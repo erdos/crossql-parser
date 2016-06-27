@@ -8,11 +8,13 @@ module SelectDSLParser (
     negateComp, Column(..), ColumnQualified(..), main, to_cnf,toPosCnf,flipComp, CompOrder(..),
     maybeLeftAlign, parseQuery,
     processTree, collectReads, parseLogicTree,
-    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides
+    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath
     ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map)
 import qualified Data.Map.Strict as M(Map, fromList)
+
+import Control.Monad
 
 import Data.Either()
 import Data.List()
@@ -41,6 +43,54 @@ data MathExpr a = D Double | I Integer | Read a
                 | Log (MathExpr a)
 	        deriving (Eq, Show, Ord)
 
+-- toSamePrecision :: Either Integer Double -> Either Integer Double -> Either Integer Double
+
+
+maybeEvalMath :: MathExpr t -> Maybe (Either Integer Double)
+maybeEvalMath (D d) = Just $ Right d
+maybeEvalMath (I i) = Just $ Left i
+maybeEvalMath (Read _) = Nothing
+maybeEvalMath (Add a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
+  where
+    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op (Left i) (Left j) = Left $ i + j
+    op (Left i) (Right d) = Right $ fromIntegral i + d
+    op (Right d) (Left i) = Right $ d + fromIntegral i
+    op (Right d) (Right dr) = Right $ d + dr
+maybeEvalMath (Sub a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
+  where
+    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op (Left i) (Left j) = Left $ i - j
+    op (Left i) (Right d) = Right $ fromIntegral i - d
+    op (Right d) (Left i) = Right $ d - fromIntegral i
+    op (Right d) (Right dr) = Right $ d - dr
+maybeEvalMath (Mul a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
+  where
+    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op (Left i) (Left j) = Left $ i * j
+    op (Left i) (Right d) = Right $ fromIntegral i * d
+    op (Right d) (Left i) = Right $ d * fromIntegral i
+    op (Right d) (Right dr) = Right $ d * dr
+maybeEvalMath (Div a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
+  where
+    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op (Left i) (Left j) = Right $ fromIntegral i / fromIntegral j
+    op (Left i) (Right d) = Right $ fromIntegral i / d
+    op (Right d) (Left i) = Right $ d / fromIntegral i
+    op (Right d) (Right dr) = Right $ d / dr
+maybeEvalMath (Pow a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
+  where
+    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op (Left i) (Left j) = Left $ i ^ j
+    op (Left i) (Right d) = Right $ fromIntegral i ** d
+    op (Right d) (Left i) = Right $ d ** fromIntegral i
+    op (Right d) (Right dr) = Right $ d ** dr
+maybeEvalMath (Log a) = liftM op (maybeEvalMath a)
+  where
+    op :: Either Integer Double -> Either Integer Double
+    op (Left i) = Right $ log $ fromIntegral i
+    op (Right d) = Right $ log d
+
 collectReads :: MathExpr a -> [a]
 collectReads (Read a) = [a]
 collectReads (Add a b) = collectReads a ++ collectReads b
@@ -60,14 +110,6 @@ data Comp a = CST a a
             | CEQ  a a
             | CNEQ a a
 	    deriving (Eq, Show, Ord)
-
-compFlip :: Comp a -> Comp a
-compFlip (CEQ p q) = CEQ q p
-compFlip (CNEQ p q) = CNEQ q p
-compFlip (CST p q) = CST q p
-compFlip (CLT p q) = CLT q p
-compFlip (CSEQ p q) = CSEQ q p
-compFlip (CLEQ p q) = CLEQ q p
 
 getCompSides :: Comp a -> (a,a)
 getCompSides (CEQ p q) = (p,q)
@@ -346,21 +388,25 @@ compToCompOrder (CLEQ _ _) = CO_LEQ
 
   -- try to produce left aligned conditions.
 -- TODO: simplify expressions by evaling
-maybeLeftAlign :: Comp (MathExpr Column) -> Maybe (CompOrder Column (Either Double Integer))
-maybeLeftAlign x = f a b --x = undefined -- visitComp f x
+maybeLeftAlign :: Comp (MathExpr Column) -> Maybe (CompOrder Column (Either Integer Double))
+maybeLeftAlign t = f a b --x = undefined -- visitComp f x
   where
-    f (Read c) (I i) = Just $ compToCompOrder x c $ Right i
-    f (Read c) (D d) = Just $ compToCompOrder x c $ Left d
-    f (I i) (Read c) = Just $ compToCompOrder (compFlip x) c $ Right i
-    f (D d) (Read c) = Just $ compToCompOrder (compFlip x) c $ Left d
+    f (Read c) x = case maybeEvalMath x of
+      Just (Left d)  -> Just $ compToCompOrder t c $ Left d
+      Just (Right i) -> Just $ compToCompOrder t c $ Right i
+      Nothing ->  Nothing
+    f x (Read c) = case maybeEvalMath x of
+      Just (Left d)  -> Just $ compToCompOrder (flipComp t) c $ Left d
+      Just (Right i) -> Just $ compToCompOrder (flipComp t) c $ Right i
+      Nothing ->  Nothing
     f _  _ = Nothing
-    (a, b) = getCompSides x
+    (a, b) = getCompSides t
 
 maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
 maybeEquation (CEQ (Read a) (Read b)) = Just (a,b)
 maybeEquation _ = Nothing
 
-tryParser :: String -> (Parser a) -> Either ParseError a
+tryParser :: String -> Parser a -> Either ParseError a
 tryParser s p = runParser p () "" s
 
 
