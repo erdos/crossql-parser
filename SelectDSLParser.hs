@@ -1,18 +1,18 @@
-{-# OPTIONS_GHC -Wall -Werror #-}
-
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+{-# OPTIONS_GHC -Wall -Werror #-}
 
 module SelectDSLParser (
    MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..),
     negateComp, Column(..), ColumnQualified(..), main, to_cnf,toPosCnf,flipComp, CompOrder(..),
     maybeLeftAlign, parseQuery,
     processTree, collectReads, parseLogicTree,
-    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath
+    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath,collectLeaves, collectPosCnfLiterals, mapPosCnfLiterals,splitPosCnfCompOrder
     ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map)
-import qualified Data.Map.Strict as M(Map, fromList)
+import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert)
 
 import Control.Monad
 
@@ -34,6 +34,8 @@ import Text.Parsec.Token as TPT
 
 data Column = ColName deriving (Eq, Show, Ord)
 
+type SomeNumber = Either Integer Double
+
 data MathExpr a = D Double | I Integer | Read a
                 | Add (MathExpr a) (MathExpr a)
                 | Sub (MathExpr a) (MathExpr a)
@@ -46,48 +48,48 @@ data MathExpr a = D Double | I Integer | Read a
 -- toSamePrecision :: Either Integer Double -> Either Integer Double -> Either Integer Double
 
 
-maybeEvalMath :: MathExpr t -> Maybe (Either Integer Double)
+maybeEvalMath :: MathExpr t -> Maybe SomeNumber
 maybeEvalMath (D d) = Just $ Right d
 maybeEvalMath (I i) = Just $ Left i
 maybeEvalMath (Read _) = Nothing
 maybeEvalMath (Add a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
-    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber -> SomeNumber
     op (Left i) (Left j) = Left $ i + j
     op (Left i) (Right d) = Right $ fromIntegral i + d
     op (Right d) (Left i) = Right $ d + fromIntegral i
     op (Right d) (Right dr) = Right $ d + dr
 maybeEvalMath (Sub a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
-    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber -> SomeNumber
     op (Left i) (Left j) = Left $ i - j
     op (Left i) (Right d) = Right $ fromIntegral i - d
     op (Right d) (Left i) = Right $ d - fromIntegral i
     op (Right d) (Right dr) = Right $ d - dr
 maybeEvalMath (Mul a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
-    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber -> SomeNumber
     op (Left i) (Left j) = Left $ i * j
     op (Left i) (Right d) = Right $ fromIntegral i * d
     op (Right d) (Left i) = Right $ d * fromIntegral i
     op (Right d) (Right dr) = Right $ d * dr
 maybeEvalMath (Div a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
-    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber -> SomeNumber
     op (Left i) (Left j) = Right $ fromIntegral i / fromIntegral j
     op (Left i) (Right d) = Right $ fromIntegral i / d
     op (Right d) (Left i) = Right $ d / fromIntegral i
     op (Right d) (Right dr) = Right $ d / dr
 maybeEvalMath (Pow a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
-    op :: Either Integer Double -> Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber -> SomeNumber
     op (Left i) (Left j) = Left $ i ^ j
     op (Left i) (Right d) = Right $ fromIntegral i ** d
     op (Right d) (Left i) = Right $ d ** fromIntegral i
     op (Right d) (Right dr) = Right $ d ** dr
 maybeEvalMath (Log a) = liftM op (maybeEvalMath a)
   where
-    op :: Either Integer Double -> Either Integer Double
+    op :: SomeNumber -> SomeNumber
     op (Left i) = Right $ log $ fromIntegral i
     op (Right d) = Right $ log d
 
@@ -148,6 +150,14 @@ data CompOrder a b = CO_ST a b
                    | CO_SEQ a b
                    | CO_NEQ a b
                    deriving (Eq, Show, Ord)
+
+elemsCompOrder :: CompOrder a b -> (a,b)
+elemsCompOrder (CO_ST x y) = (x,y)
+elemsCompOrder (CO_LT x y) = (x,y)
+elemsCompOrder (CO_EQ x y) = (x,y)
+elemsCompOrder (CO_NEQ x y) = (x,y)
+elemsCompOrder (CO_SEQ x y) = (x,y)
+elemsCompOrder (CO_LEQ x y) = (x,y)
 
 
 negateComp :: Comp t -> Comp t
@@ -318,6 +328,11 @@ parseLogicTree pa = _start
 parseWhereClause :: Parser ParsedWhereClause
 parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnEitherQualified
 
+collectLeaves :: LogicTree t -> [t]
+collectLeaves (Leaf a) = [a]
+collectLeaves (Not a) = collectLeaves a
+collectLeaves (And a b) = collectLeaves a ++ collectLeaves b
+collectLeaves (Or a b) = collectLeaves a ++ collectLeaves b
 
 parseQuery :: Parser ParsedQueryTree
 parseQuery =
@@ -343,9 +358,7 @@ data CNF a = Clauses (S.Set (Clause a))
 oneset :: (Ord a) => a -> S.Set a
 oneset x = S.insert x S.empty
 
-
 to_cnf :: (Ord a) => LogicTree a -> CNF a
-
 to_cnf (And x y) = Clauses (S.union xs ys)
   where
     Clauses xs = to_cnf x
@@ -375,6 +388,12 @@ toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
   where f (PosNeg gg hh) = PosC (S.union gg (S.map negateComp hh))
 
+collectPosCnfLiterals :: PosCNF a -> [a]
+collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
+
+mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
+mapPosCnfLiterals f (PosClauses cs) =
+  PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
 
 compToCompOrder :: Comp a -> b -> c -> CompOrder b c
 compToCompOrder (CST _ _) = CO_ST
@@ -388,7 +407,7 @@ compToCompOrder (CLEQ _ _) = CO_LEQ
 
   -- try to produce left aligned conditions.
 -- TODO: simplify expressions by evaling
-maybeLeftAlign :: Comp (MathExpr Column) -> Maybe (CompOrder Column (Either Integer Double))
+maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeNumber)
 maybeLeftAlign t = f a b --x = undefined -- visitComp f x
   where
     f (Read c) x = case maybeEvalMath x of
@@ -413,9 +432,47 @@ tryParser s p = runParser p () "" s
 main :: IO ()
 main = undefined
 
+
+groupMapBy :: (Ord k) => (a -> k) -> [a] -> M.Map k [a]
+groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
+
+-- assert: xs is not empty.
+maybeAllMapToSame :: (Eq k) => (a->k) -> [a] -> Maybe k
+maybeAllMapToSame _ [] = Nothing
+maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Nothing
+
+
+
+-- in each map val -> it contains left sides only = map key
+splitPosCnfCompOrder :: (Eq a) => (Ord a) => (Ord b) => PosCNF (CompOrder a b)
+  -> (Maybe (PosCNF (CompOrder a b)),
+      M.Map a (PosCNF (CompOrder a b)))
+splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
+  where
+    common = liftM (PosClauses . S.fromList) (M.lookup Nothing m)
+    spec =  M.foldlWithKey (\mm k v ->
+                              (case k of  -- v is a list
+                                 Just a -> M.insert a (PosClauses (S.fromList v)) mm
+                                 Nothing -> mm)) M.empty m
+    m = groupMapBy maybeHomogenClause (S.elems pcnf)
+    maybeHomogenClause (PosC clauseSet) =
+      maybeAllMapToSame (fst . elemsCompOrder) (S.elems clauseSet)
+
+prepareWhereClauseFlatten :: PosCNF (Comp (MathExpr ColumnEitherQualified))
+                          -> (PosCNF (Comp (MathExpr ColumnEitherQualified)),
+                              M.Map ColumnEitherQualified
+                               (PosCNF (CompOrder ColumnEitherQualified
+                                         SomeNumber)))
+prepareWhereClauseFlatten = undefined
+
+
+
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> ResultQueryTree
-processTree =undefined --(PQT columnMap fromClause whereClause)=undefined
+processTree = undefined f --(PQT columnMap fromClause whereClause)=undefined
+  where
+    f = prepareWhereClauseFlatten
+    -- g = splitPosCnfCompOrder undefined undefined
   -- TODO:
   -- - see if all column names could be resolved in conditions
   -- - in conditions: if col name is not resolved -> die
@@ -423,4 +480,4 @@ processTree =undefined --(PQT columnMap fromClause whereClause)=undefined
   -- - split where to diff clauses based on column name qualifs involved.create subtrees on cond.
   -- step by step;
   -- 1. cnf where. throw err on unresolved itms.
-  -- 2. left align cnf, subexpressions (eq partitions in em).
+  -- 2. left align cnf, subexpressions (eq partitions in em).f
