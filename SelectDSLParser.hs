@@ -8,7 +8,7 @@ module SelectDSLParser (
     negateComp, Column(..), ColumnQualified(..), main, to_cnf,toPosCnf,flipComp, CompOrder(..),
     maybeLeftAlign, parseQuery,
     processTree, collectReads, parseLogicTree,
-    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath,collectLeaves, collectPosCnfLiterals, mapPosCnfLiterals,splitPosCnfCompOrder
+    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath,collectLeaves, collectPosCnfLiterals, mapPosCnfLiterals,splitPosCnfCompOrder,flipCompOrder, negateCompOrder
     ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map)
@@ -177,6 +177,28 @@ flipComp x = case x of
   (CNEQ a b) -> CNEQ b a
   (CSEQ a b) -> CLEQ b a
   (CLEQ a b) -> CSEQ b a
+
+flipCompOrder :: CompOrder a b -> CompOrder b a
+flipCompOrder x = case x of
+  (CO_ST a b) -> CO_LT b a
+  (CO_LT a b) -> CO_ST b a
+  (CO_EQ a b) -> CO_EQ b a
+  (CO_NEQ a b) -> CO_NEQ b a
+  (CO_SEQ a b) -> CO_LEQ b a
+  (CO_LEQ a b) -> CO_SEQ b a
+
+negateCompOrder :: CompOrder a b -> CompOrder a b
+negateCompOrder x = case x of
+  (CO_ST a b) -> CO_LEQ a b
+  (CO_LEQ a b) -> CO_ST a b
+  (CO_EQ a b) -> CO_NEQ a b
+  (CO_NEQ a b) -> CO_EQ a b
+  (CO_SEQ a b) -> CO_LT a b
+  (CO_LT a b) -> CO_SEQ a b
+
+
+-- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
+
 
 
 type ColumnName = String
@@ -444,7 +466,8 @@ maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Not
 
 
 -- in each map val -> it contains left sides only = map key
-splitPosCnfCompOrder :: (Eq a) => (Ord a) => (Ord b) => PosCNF (CompOrder a b)
+splitPosCnfCompOrder :: (Eq a) => (Ord a) => (Ord b) =>
+  PosCNF (CompOrder a b)
   -> (Maybe (PosCNF (CompOrder a b)),
       M.Map a (PosCNF (CompOrder a b)))
 splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
@@ -458,13 +481,22 @@ splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
     maybeHomogenClause (PosC clauseSet) =
       maybeAllMapToSame (fst . elemsCompOrder) (S.elems clauseSet)
 
-prepareWhereClauseFlatten :: PosCNF (Comp (MathExpr ColumnEitherQualified))
-                          -> (PosCNF (Comp (MathExpr ColumnEitherQualified)),
-                              M.Map ColumnEitherQualified
-                               (PosCNF (CompOrder ColumnEitherQualified
-                                         SomeNumber)))
-prepareWhereClauseFlatten = undefined
+type ParsedComp = Comp (MathExpr ColumnEitherQualified)
 
+
+prepareWhereClauseFlatten
+  :: PosCNF ParsedComp
+  -> (PosCNF ParsedComp,
+       M.Map ColumnEitherQualified
+             (PosCNF (CompOrder ColumnEitherQualified SomeNumber)))
+prepareWhereClauseFlatten = undefined
+  -- ha egy kozban minden literal baloldalra hozhato
+  -- -> beletesszuk a mapba
+  -- -> egyebkent nem.
+  -- where
+  --  handle k v = undefined
+-- 1. convert to left-aligned cnf
+-- 2. return tuple from pref fn.
 
 
 -- parse and move names, aliases, expressions to right layer.
@@ -472,6 +504,10 @@ processTree :: ParsedQueryTree -> ResultQueryTree
 processTree = undefined f --(PQT columnMap fromClause whereClause)=undefined
   where
     f = prepareWhereClauseFlatten
+    -- ha mindegyik a mapban van
+    -- -> ha a map egyelemu -> es a tabla is -> letrehozhatunk egy egyelemut.
+    -- -> ha tobb tabla van, v tobb elem a mapban -> tablankent letrehozunk
+    --    egy
     -- g = splitPosCnfCompOrder undefined undefined
   -- TODO:
   -- - see if all column names could be resolved in conditions
