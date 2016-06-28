@@ -24,6 +24,7 @@ import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
+
 data Column = ColName deriving (Eq, Show, Ord)
 
 type SomeNumber = Either Integer Double
@@ -37,8 +38,10 @@ data MathExpr a = D Double | I Integer | Read a
                 | Log (MathExpr a)
 	        deriving (Eq, Show, Ord)
 
+
 class PrClj a where
   pr :: a -> String
+
 
 instance (PrClj a) => PrClj (MathExpr a) where
   pr (D d) = show d
@@ -50,6 +53,7 @@ instance (PrClj a) => PrClj (MathExpr a) where
   pr (Div a b) = "(/ " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Pow a b) = "(pow " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Log a) = "(log " ++ pr a ++ ")"
+
 
 instance PrClj ColumnQualified where
   pr (CQ a b) = show a ++ "." ++ show b
@@ -70,16 +74,17 @@ instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CLT a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
   pr (CST a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
 
+
 instance (PrClj a) => PrClj (PosCNF a) where
   pr (PosClauses cs) = "(and " ++ unwords (map f $ S.elems cs) ++ ")"
     where
       f (PosC c) = "(or " ++ unwords (map pr (S.elems c)) ++ ")"
 
 
-
 someNumberMathExpr :: SomeNumber -> MathExpr a
 someNumberMathExpr (Left i) = I i
 someNumberMathExpr (Right d) = D d
+
 
 maybeEvalMath :: MathExpr t -> Maybe SomeNumber
 maybeEvalMath (D d) = Just $ Right d
@@ -125,6 +130,7 @@ maybeEvalMath (Log a) = liftM op (maybeEvalMath a)
     op :: SomeNumber -> SomeNumber
     op (Left i) = Right $ log $ fromIntegral i
     op (Right d) = Right $ log d
+
 
 collectReads :: MathExpr a -> [a]
 collectReads (Read a) = [a]
@@ -272,14 +278,18 @@ parseFromClause =
               a <- parseTableAlias;
               return (a, Left t)}
 
+
 parseColumnAlias :: Parser ColumnAlias
 parseColumnAlias = identifier haskell
+
 
 parseColumnName :: Parser ColumnName
 parseColumnName = identifier haskell
 
+
 parseTableAlias :: Parser TableAlias
 parseTableAlias = identifier haskell
+
 
 parseTableName :: Parser TableName
 parseTableName = identifier haskell
@@ -304,6 +314,7 @@ parseColumnEitherQualified = do {
          return $ Left $ CQ str qq
         })}
 
+
 parseColumnQualified :: Parser ColumnQualified
 parseColumnQualified = do {
   tab <- parseTableName;
@@ -320,14 +331,11 @@ parseSelectClause =
   do { xs <- commaSep1 haskell part;
        return $ M.fromList xs}
   where
-
     part :: Parser (ColumnAlias, ColumnQualified)
     part = part2 <|> part1
-
     -- no alias is given: alis will be full qualified name with dot.
     part1 = do {qualified@(CQ table column) <- parseColumnQualified;
                 return (table ++ "." ++ column, qualified)}
-
     -- alias is given.
     part2 = do {pq <- parseColumnQualified;
                 spaces;
@@ -360,6 +368,7 @@ data LogicTree a = And (LogicTree a) (LogicTree a)
                  | Leaf a
 	deriving (Eq, Show, Ord)
 
+
 parseLogicTree :: Parser a -> Parser (LogicTree a)
 parseLogicTree pa = _start
   where
@@ -371,14 +380,17 @@ parseLogicTree pa = _start
     _pp  = do {spaces; x <- pa; return $ Leaf x}
     _ll  = parens haskell _start <|> _not <|> _pp
 
+
 parseWhereClause :: Parser ParsedWhereClause
 parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnQualified
+
 
 collectLeaves :: LogicTree t -> [t]
 collectLeaves (Leaf a) = [a]
 collectLeaves (Not a) = collectLeaves a
 collectLeaves (And a b) = collectLeaves a ++ collectLeaves b
 collectLeaves (Or a b) = collectLeaves a ++ collectLeaves b
+
 
 parseQuery :: Parser ParsedQueryTree
 parseQuery =
@@ -403,6 +415,7 @@ data CNF a = Clauses (S.Set (Clause a))
 
 oneset :: (Ord a) => a -> S.Set a
 oneset x = S.insert x S.empty
+
 
 to_cnf :: (Ord a) => LogicTree a -> CNF a
 to_cnf (And x y) = Clauses (S.union xs ys)
@@ -429,19 +442,24 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
+
 conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
 conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
+
 
 toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
   where f (PosNeg gg hh) = PosC (S.union gg (S.map negateComp hh))
 
+
 collectPosCnfLiterals :: PosCNF a -> [a]
 collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
+
 
 mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
 mapPosCnfLiterals f (PosClauses cs) =
   PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
+
 
 compToCompOrder :: Comp a -> b -> c -> CompOrder b c
 compToCompOrder (CST _ _) = CST
@@ -468,9 +486,11 @@ maybeLeftAlign t = f a b --x = undefined -- visitComp f x
     f _  _ = Nothing
     (a, b) = getCompSides t
 
+
 maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
 maybeEquation (CEQ (Read a) (Read b)) = Just (a,b)
 maybeEquation _ = Nothing
+
 
 tryParser :: String -> Parser a -> Either ParseError a
 tryParser s p = runParser p () "" s
@@ -527,9 +547,7 @@ prepareWhereClauseFlatten (PosClauses clauses) = (build bb, build aa)
     --- Comp to CompOrder -> MaybeLeftAlign
     doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeNumber))
     doClause (PosC clause) = liftM (PosC . S.fromList) $ mapM maybeLeftAlign $ S.elems clause
-
     build set = if S.null set then Nothing else Just $ PosClauses set
-
     (aa,bb) = foldl (\(a,b) x ->
                   case doClause x of
                     Just t  -> (S.insert t a, b);
@@ -562,22 +580,23 @@ processTreeSimple = SimpleRQT
 
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> ResultQueryTree
-
 processTree (PQT columnMap tableMap whereClause) =
   case M.assocs tableMap of
     [(tAlias, Right tName)] ->
       if [tAlias] == nub ( map (\(CQ c _) -> c) $ M.elems columnMap)
-      then processTreeSimple cMap tName cnfs
+      then processTreeSimple cMap tName cnf
       else error "Unexpected table aliases in column map."
       where cMap       = M.map (\(CQ _ columnName) -> columnName) columnMap
-            cnfs       = cnf
             (Just cnf) = M.lookup tAlias whereMap -- maybe alias for full table name too.
     _  -> undefined whereJoin whereMap
     -- create subrequests for each table and move conditions to these levels.
-    --
-    --
-    --
+    -- -- if val is str (not table obj -> create table obj)
+    -- -- if val is table obj -> conjoin corresponding where clause
+    -- --
     --
     --
   where
     (whereJoin, whereMap) = prepareWhereClause whereClause
+
+
+-- END
