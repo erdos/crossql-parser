@@ -54,11 +54,13 @@ instance (PrClj a) => PrClj (MathExpr a) where
 instance PrClj ColumnQualified where
   pr (CQ a b) = show a ++ "." ++ show b
 
+{-
 instance (PrClj a) => PrClj (LogicTree a) where
   pr (And a b) = "(and " ++ pr a ++ " " ++ pr b ++")"
   pr (Or a b) = "(or " ++ pr a ++ " " ++ pr b ++")"
   pr (Not a) = "(not " ++ pr a ++")"
   pr (Leaf a) = pr a
+-}
 
 instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CEQ a b) = "(== " ++ pr a ++ " " ++ pr b ++")"
@@ -67,6 +69,12 @@ instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CSEQ a b) = "(<= " ++ pr a ++ " " ++ pr b ++")"
   pr (CLT a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
   pr (CST a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
+
+instance (PrClj a) => PrClj (PosCNF a) where
+  pr (PosClauses cs) = "(and " ++ unwords (map f $ S.elems cs) ++ ")"
+    where
+      f (PosC c) = "(or " ++ unwords (map pr (S.elems c)) ++ ")"
+
 
 
 someNumberMathExpr :: SomeNumber -> MathExpr a
@@ -215,10 +223,7 @@ negateComp x = case x of
   (CSEQ a b) -> CLT a b
   (CLT a b) -> CSEQ a b
 
-
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
-
-
 
 type ColumnName = String
 
