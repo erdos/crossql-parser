@@ -4,33 +4,25 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 module SelectDSLParser (
-   MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..),
-    negateComp, Column(..), ColumnQualified(..), main, to_cnf,toPosCnf,flipComp, CompOrder(..),
-    maybeLeftAlign, parseQuery,
-    processTree, collectReads, parseLogicTree,
-    tryParser, maybeEquation,visitComp, compToCompOrder, getCompSides,maybeEvalMath,collectLeaves, collectPosCnfLiterals, mapPosCnfLiterals,splitPosCnfCompOrder,flipCompOrder, negateCompOrder
-    ) where
+   MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
+   ColumnQualified(..), CompOrder(..), PrClj(..), main,
+   parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
+   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1
+   ) where
 
-import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map)
-import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert)
+import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
+import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map, elems)
 
 import Control.Monad
 
 import Data.Either()
-import Data.List()
+import Data.List(nub)
 
 import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces)
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
-
--- import Prelude (Eq)
---import Text.Parsec.Token (float, parens)
---import Text.Parsec.String
---import Text.Parsec.Expr
---import Text.Parsec.Char as TPC(string, letter,char)
-
 
 data Column = ColName deriving (Eq, Show, Ord)
 
@@ -45,8 +37,41 @@ data MathExpr a = D Double | I Integer | Read a
                 | Log (MathExpr a)
 	        deriving (Eq, Show, Ord)
 
--- toSamePrecision :: Either Integer Double -> Either Integer Double -> Either Integer Double
+class PrClj a where
+  pr :: a -> String
 
+instance (PrClj a) => PrClj (MathExpr a) where
+  pr (D d) = show d
+  pr (I i) = show i
+  pr (Read t) = pr t
+  pr (Add a b) = "(+ " ++ pr a ++ " " ++ pr b ++ ")"
+  pr (Sub a b) = "(- " ++ pr a ++ " " ++ pr b ++ ")"
+  pr (Mul a b) = "(* " ++ pr a ++ " " ++ pr b ++ ")"
+  pr (Div a b) = "(/ " ++ pr a ++ " " ++ pr b ++ ")"
+  pr (Pow a b) = "(pow " ++ pr a ++ " " ++ pr b ++ ")"
+  pr (Log a) = "(log " ++ pr a ++ ")"
+
+instance PrClj ColumnQualified where
+  pr (CQ a b) = show a ++ "." ++ show b
+
+instance (PrClj a) => PrClj (LogicTree a) where
+  pr (And a b) = "(and " ++ pr a ++ " " ++ pr b ++")"
+  pr (Or a b) = "(or " ++ pr a ++ " " ++ pr b ++")"
+  pr (Not a) = "(not " ++ pr a ++")"
+  pr (Leaf a) = pr a
+
+instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
+  pr (CEQ a b) = "(== " ++ pr a ++ " " ++ pr b ++")"
+  pr (CNEQ a b) = "(!= " ++ pr a ++ " " ++ pr b ++")"
+  pr (CLEQ a b) = "(>= " ++ pr a ++ " " ++ pr b ++")"
+  pr (CSEQ a b) = "(<= " ++ pr a ++ " " ++ pr b ++")"
+  pr (CLT a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
+  pr (CST a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
+
+
+someNumberMathExpr :: SomeNumber -> MathExpr a
+someNumberMathExpr (Left i) = I i
+someNumberMathExpr (Right d) = D d
 
 maybeEvalMath :: MathExpr t -> Maybe SomeNumber
 maybeEvalMath (D d) = Just $ Right d
@@ -103,23 +128,29 @@ collectReads (Pow a b) = collectReads a ++ collectReads b
 collectReads (Log a) = collectReads a
 collectReads _ = []
 
+-- COMPARISON OPERATOR
 
--- eval locally
-data Comp a = CST a a
-            | CLT a a
-            | CSEQ a a
-            | CLEQ a a
-            | CEQ  a a
-            | CNEQ a a
-	    deriving (Eq, Show, Ord)
+data CompOrder a b = CST a b
+                   | CLT a b
+                   | CEQ a b
+                   | CLEQ a b
+                   | CSEQ a b
+                   | CNEQ a b
+                   deriving (Eq, Show, Ord)
 
-getCompSides :: Comp a -> (a,a)
+type Comp a = CompOrder a a
+
+-- compLeft :: CompOrder a b -> a
+-- compLeft = fst . getCompSides
+
+getCompSides :: CompOrder a b -> (a,b)
 getCompSides (CEQ p q) = (p,q)
 getCompSides (CNEQ p q) = (p,q)
 getCompSides (CST p q) = (p,q)
 getCompSides (CLT p q) = (p,q)
 getCompSides (CLEQ p q) = (p,q)
 getCompSides (CSEQ p q) = (p,q)
+
 
 visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 visitComp f (CST x y) = f CST x y
@@ -128,6 +159,19 @@ visitComp f (CSEQ x y) = f CSEQ x y
 visitComp f (CLEQ x y) = f CLEQ x y
 visitComp f (CEQ x y) = f CEQ x y
 visitComp f (CNEQ x y) = f CNEQ x y
+
+
+mapComp :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
+mapComp f g (CEQ x y) = CEQ (f x) (g y)
+mapComp f g (CNEQ x y) = CNEQ (f x) (g y)
+mapComp f g (CLT x y) = CLT (f x) (g y)
+mapComp f g (CST x y) = CST (f x) (g y)
+mapComp f g (CLEQ x y) = CLEQ (f x) (g y)
+mapComp f g (CSEQ x y) = CSEQ (f x) (g y)
+
+
+mapComp1 :: (a -> e) -> Comp a -> Comp e
+mapComp1 f = mapComp f f
 
 
 parseComp :: Parser a -> Parser (Comp a)
@@ -142,34 +186,17 @@ parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
       <|> x "<" CST
       <|> x ">" CLT
 
--- eval in cloud
-data CompOrder a b = CO_ST a b
-                   | CO_LT a b
-                   | CO_EQ a b
-                   | CO_LEQ a b
-                   | CO_SEQ a b
-                   | CO_NEQ a b
-                   deriving (Eq, Show, Ord)
 
 elemsCompOrder :: CompOrder a b -> (a,b)
-elemsCompOrder (CO_ST x y) = (x,y)
-elemsCompOrder (CO_LT x y) = (x,y)
-elemsCompOrder (CO_EQ x y) = (x,y)
-elemsCompOrder (CO_NEQ x y) = (x,y)
-elemsCompOrder (CO_SEQ x y) = (x,y)
-elemsCompOrder (CO_LEQ x y) = (x,y)
+elemsCompOrder (CST x y) = (x,y)
+elemsCompOrder (CLT x y) = (x,y)
+elemsCompOrder (CEQ x y) = (x,y)
+elemsCompOrder (CNEQ x y) = (x,y)
+elemsCompOrder (CSEQ x y) = (x,y)
+elemsCompOrder (CLEQ x y) = (x,y)
 
 
-negateComp :: Comp t -> Comp t
-negateComp x = case x of
-  (CST a b) -> CLEQ a b
-  (CLT a b) -> CSEQ a b
-  (CEQ a b) -> CNEQ a b
-  (CNEQ a b) -> CEQ a b
-  (CSEQ a b) -> CLT a b
-  (CLEQ a b) -> CST a b
-
-flipComp :: Comp t -> Comp t
+flipComp :: CompOrder a b -> CompOrder b a
 flipComp x = case x of
   (CST a b) -> CLT b a
   (CLT a b) -> CST b a
@@ -178,23 +205,15 @@ flipComp x = case x of
   (CSEQ a b) -> CLEQ b a
   (CLEQ a b) -> CSEQ b a
 
-flipCompOrder :: CompOrder a b -> CompOrder b a
-flipCompOrder x = case x of
-  (CO_ST a b) -> CO_LT b a
-  (CO_LT a b) -> CO_ST b a
-  (CO_EQ a b) -> CO_EQ b a
-  (CO_NEQ a b) -> CO_NEQ b a
-  (CO_SEQ a b) -> CO_LEQ b a
-  (CO_LEQ a b) -> CO_SEQ b a
 
-negateCompOrder :: CompOrder a b -> CompOrder a b
-negateCompOrder x = case x of
-  (CO_ST a b) -> CO_LEQ a b
-  (CO_LEQ a b) -> CO_ST a b
-  (CO_EQ a b) -> CO_NEQ a b
-  (CO_NEQ a b) -> CO_EQ a b
-  (CO_SEQ a b) -> CO_LT a b
-  (CO_LT a b) -> CO_SEQ a b
+negateComp :: CompOrder a b -> CompOrder a b
+negateComp x = case x of
+  (CST a b) -> CLEQ a b
+  (CLEQ a b) -> CST a b
+  (CEQ a b) -> CNEQ a b
+  (CNEQ a b) -> CEQ a b
+  (CSEQ a b) -> CLT a b
+  (CLT a b) -> CSEQ a b
 
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
@@ -204,7 +223,7 @@ negateCompOrder x = case x of
 type ColumnName = String
 
 type ColumnAlias = String
-data ColumnQualified = CQ TableAlias ColumnName deriving (Show, Eq)
+data ColumnQualified = CQ TableAlias ColumnName deriving (Show, Eq, Ord)
 
 type TableName = String
 type TableAlias = String
@@ -213,7 +232,7 @@ type ColumnEitherQualified = Either ColumnQualified ColumnName
 
 type ColumnMap         = M.Map ColumnAlias ColumnQualified
 type ParsedFromClause  = (M.Map TableAlias (Either ParsedQueryTree TableName))
-type ParsedWhereClause = (LogicTree (Comp (MathExpr ColumnEitherQualified)))
+type ParsedWhereClause = (LogicTree (Comp (MathExpr ColumnQualified)))
 
 -- get it from parser
 data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause deriving (Eq, Show)
@@ -224,9 +243,9 @@ data ResultQueryTree = NestedRQT
                          (M.Map TableAlias (Either ResultQueryTree TableName))
                          (PosCNF (Comp (MathExpr ColumnQualified)))
                      |  SimpleRQT
-                        [ColumnName]
+                        (M.Map ColumnAlias ColumnName)
                         TableName
-                        (PosCNF (CompOrder ColumnName Double))
+                        (PosCNF (CompOrder ColumnName SomeNumber))
                      deriving (Eq, Show)
 
 
@@ -348,7 +367,7 @@ parseLogicTree pa = _start
     _ll  = parens haskell _start <|> _not <|> _pp
 
 parseWhereClause :: Parser ParsedWhereClause
-parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnEitherQualified
+parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnQualified
 
 collectLeaves :: LogicTree t -> [t]
 collectLeaves (Leaf a) = [a]
@@ -405,6 +424,8 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
+conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
+conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
 
 toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
@@ -418,17 +439,16 @@ mapPosCnfLiterals f (PosClauses cs) =
   PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
 
 compToCompOrder :: Comp a -> b -> c -> CompOrder b c
-compToCompOrder (CST _ _) = CO_ST
-compToCompOrder (CLT _ _) = CO_LT
-compToCompOrder (CEQ _ _) = CO_EQ
-compToCompOrder (CNEQ _ _) = CO_NEQ
-compToCompOrder (CSEQ _ _) = CO_SEQ
-compToCompOrder (CLEQ _ _) = CO_LEQ
+compToCompOrder (CST _ _) = CST
+compToCompOrder (CLT _ _) = CLT
+compToCompOrder (CEQ _ _) = CEQ
+compToCompOrder (CNEQ _ _) = CNEQ
+compToCompOrder (CSEQ _ _) = CSEQ
+compToCompOrder (CLEQ _ _) = CLEQ
 
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 
   -- try to produce left aligned conditions.
--- TODO: simplify expressions by evaling
 maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeNumber)
 maybeLeftAlign t = f a b --x = undefined -- visitComp f x
   where
@@ -465,55 +485,94 @@ maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Not
 
 
 
--- in each map val -> it contains left sides only = map key
-splitPosCnfCompOrder :: (Eq a) => (Ord a) => (Ord b) =>
-  PosCNF (CompOrder a b)
-  -> (Maybe (PosCNF (CompOrder a b)),
-      M.Map a (PosCNF (CompOrder a b)))
+-- given cnf -> collects clauses with same table alias on left side. (and rest clauses)
+splitPosCnfCompOrder ::
+  PosCNF (CompOrder ColumnQualified SomeNumber)
+  -> (Maybe (PosCNF (CompOrder ColumnQualified SomeNumber)),
+      M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber)))
 splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
   where
     common = liftM (PosClauses . S.fromList) (M.lookup Nothing m)
+    spec :: M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber))
     spec =  M.foldlWithKey (\mm k v ->
                               (case k of  -- v is a list
-                                 Just a -> M.insert a (PosClauses (S.fromList v)) mm
+                                 Just a -> M.insert a (mapPosCnfLiterals
+                                                       (mapComp (\(CQ _ c) -> c) id)
+                                                       (PosClauses (S.fromList v))) mm
                                  Nothing -> mm)) M.empty m
+
+    m :: M.Map (Maybe TableAlias) [PosClause (CompOrder ColumnQualified SomeNumber)]
     m = groupMapBy maybeHomogenClause (S.elems pcnf)
+
+    -- RETURN TableAlias when all literal share the same.
+    maybeHomogenClause :: PosClause (CompOrder ColumnQualified SomeNumber) -> Maybe TableAlias
     maybeHomogenClause (PosC clauseSet) =
-      maybeAllMapToSame (fst . elemsCompOrder) (S.elems clauseSet)
+      maybeAllMapToSame ((\(CQ c _) -> c) . fst . elemsCompOrder) (S.elems clauseSet)
 
-type ParsedComp = Comp (MathExpr ColumnEitherQualified)
+type ParsedComp = Comp (MathExpr ColumnQualified)
 
 
+
+-- orders as much conditions as possible.
 prepareWhereClauseFlatten
   :: PosCNF ParsedComp
-  -> (PosCNF ParsedComp,
-       M.Map ColumnEitherQualified
-             (PosCNF (CompOrder ColumnEitherQualified SomeNumber)))
-prepareWhereClauseFlatten = undefined
-  -- ha egy kozban minden literal baloldalra hozhato
-  -- -> beletesszuk a mapba
-  -- -> egyebkent nem.
-  -- where
-  --  handle k v = undefined
--- 1. convert to left-aligned cnf
--- 2. return tuple from pref fn.
+        -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeNumber)))
+prepareWhereClauseFlatten (PosClauses clauses) = (build bb, build aa)
+  where
+    --- Comp to CompOrder -> MaybeLeftAlign
+    doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeNumber))
+    doClause (PosC clause) = liftM (PosC . S.fromList) $ mapM maybeLeftAlign $ S.elems clause
 
+    build set = if S.null set then Nothing else Just $ PosClauses set
+
+    (aa,bb) = foldl (\(a,b) x ->
+                  case doClause x of
+                    Just t  -> (S.insert t a, b);
+                    Nothing -> (a, S.insert x b))
+              (S.empty,S.empty) (S.elems clauses)
+
+
+-- first value: CNF that could either not be left aligned or contains join statemt.
+-- second value: left aligned cnf in map by table alias name.
+prepareWhereClause :: LogicTree ParsedComp
+                   -> (Maybe (PosCNF ParsedComp),
+                       M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber)))
+prepareWhereClause tree = rrr
+  where
+    (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ to_cnf tree
+    --convertBack :: PosCNF (CompOrder ColumnQualified SomeNumber) -> PosCNF ParsedComp
+    convertBack = mapPosCnfLiterals (mapComp Read someNumberMathExpr)
+    rrr = case orderCnfMaybe of
+      Nothing -> (mixCnfMaybe, M.empty)
+      Just lefts -> case splitPosCnfCompOrder lefts of
+                      (Nothing, m) -> (mixCnfMaybe, m)
+                      (Just aa, m) -> case mixCnfMaybe of
+                                        Nothing -> (Just $ convertBack aa , m);
+                                        Just bb -> (Just $ conjunction (convertBack aa) bb, m)
+
+
+processTreeSimple :: M.Map ColumnAlias ColumnName
+  -> TableName -> PosCNF (CompOrder ColumnName SomeNumber)  -> ResultQueryTree
+processTreeSimple = SimpleRQT
 
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> ResultQueryTree
-processTree = undefined f --(PQT columnMap fromClause whereClause)=undefined
+
+processTree (PQT columnMap tableMap whereClause) =
+  case M.assocs tableMap of
+    [(tAlias, Right tName)] ->
+      if [tAlias] == nub ( map (\(CQ c _) -> c) $ M.elems columnMap)
+      then processTreeSimple cMap tName cnfs
+      else error "Unexpected table aliases in column map."
+      where cMap       = M.map (\(CQ _ columnName) -> columnName) columnMap
+            cnfs       = cnf
+            (Just cnf) = M.lookup tAlias whereMap -- maybe alias for full table name too.
+    _  -> undefined whereJoin whereMap
+    -- create subrequests for each table and move conditions to these levels.
+    --
+    --
+    --
+    --
+    --
   where
-    f = prepareWhereClauseFlatten
-    -- ha mindegyik a mapban van
-    -- -> ha a map egyelemu -> es a tabla is -> letrehozhatunk egy egyelemut.
-    -- -> ha tobb tabla van, v tobb elem a mapban -> tablankent letrehozunk
-    --    egy
-    -- g = splitPosCnfCompOrder undefined undefined
-  -- TODO:
-  -- - see if all column names could be resolved in conditions
-  -- - in conditions: if col name is not resolved -> die
-  -- - left align conditions, create sub op with em.
-  -- - split where to diff clauses based on column name qualifs involved.create subtrees on cond.
-  -- step by step;
-  -- 1. cnf where. throw err on unresolved itms.
-  -- 2. left align cnf, subexpressions (eq partitions in em).f
+    (whereJoin, whereMap) = prepareWhereClause whereClause
