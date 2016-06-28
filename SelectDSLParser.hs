@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
@@ -7,11 +9,12 @@ module SelectDSLParser (
    MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
    ColumnQualified(..), CompOrder(..), PrClj(..), main,
    parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
-   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1
+   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1, doParse,
+   mapMathExpr
    ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
-import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map, elems)
+import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map, elems, mapWithKey)
 
 import Control.Monad
 
@@ -38,6 +41,21 @@ data MathExpr a = D Double | I Integer | Read a
                 | Log (MathExpr a)
 	        deriving (Eq, Show, Ord)
 
+numberToMathExpr :: SomeNumber -> MathExpr a
+numberToMathExpr (Left i) = I i
+numberToMathExpr (Right d) = D d
+
+mapMathExpr :: (a->b) -> MathExpr a -> MathExpr b
+mapMathExpr f (Read x) = Read $ f x
+mapMathExpr f (Add a b) = Add (mapMathExpr f a) (mapMathExpr f b)
+mapMathExpr f (Sub a b) = Sub (mapMathExpr f a) (mapMathExpr f b)
+mapMathExpr f (Mul a b) = Mul (mapMathExpr f a) (mapMathExpr f b)
+mapMathExpr f (Div a b) = Div (mapMathExpr f a) (mapMathExpr f b)
+mapMathExpr f (Pow a b) = Pow (mapMathExpr f a) (mapMathExpr f b)
+mapMathExpr f (Log a) = Log (mapMathExpr f a)
+mapMathExpr _ (D d) = (D d)
+mapMathExpr _ (I i) = (I i)
+
 
 class PrClj a where
   pr :: a -> String
@@ -56,7 +74,7 @@ instance (PrClj a) => PrClj (MathExpr a) where
 
 
 instance PrClj ColumnQualified where
-  pr (CQ a b) = show a ++ "." ++ show b
+  pr (CQ a b) = a ++ "/" ++ b
 
 {-
 instance (PrClj a) => PrClj (LogicTree a) where
@@ -79,6 +97,9 @@ instance (PrClj a) => PrClj (PosCNF a) where
   pr (PosClauses cs) = "(and " ++ unwords (map f $ S.elems cs) ++ ")"
     where
       f (PosC c) = "(or " ++ unwords (map pr (S.elems c)) ++ ")"
+
+instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
+  pr m = "{" ++ (concatMap (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m) ++ "}"
 
 
 someNumberMathExpr :: SomeNumber -> MathExpr a
@@ -165,7 +186,6 @@ getCompSides (CLT p q) = (p,q)
 getCompSides (CLEQ p q) = (p,q)
 getCompSides (CSEQ p q) = (p,q)
 
-
 visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 visitComp f (CST x y) = f CST x y
 visitComp f (CLT x y) = f CLT x y
@@ -239,7 +259,7 @@ data ColumnQualified = CQ TableAlias ColumnName deriving (Show, Eq, Ord)
 type TableName = String
 type TableAlias = String
 
-type ColumnEitherQualified = Either ColumnQualified ColumnName
+type ColumnEitherQualified = Either ColumnQualified ColumnAlias
 
 type ColumnMap         = M.Map ColumnAlias ColumnQualified
 type ParsedFromClause  = (M.Map TableAlias (Either ParsedQueryTree TableName))
@@ -251,7 +271,7 @@ data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause deriving
 -- this is the output. also holds info on evaluation order
 data ResultQueryTree = NestedRQT
                          (M.Map ColumnAlias ColumnQualified)
-                         (M.Map TableAlias (Either ResultQueryTree TableName))
+                         (M.Map TableAlias ResultQueryTree)
                          (PosCNF (Comp (MathExpr ColumnQualified)))
                      |  SimpleRQT
                         (M.Map ColumnAlias ColumnName)
@@ -259,6 +279,16 @@ data ResultQueryTree = NestedRQT
                         (PosCNF (CompOrder ColumnName SomeNumber))
                      deriving (Eq, Show)
 
+instance PrClj ColumnAlias where
+  pr = id
+
+instance PrClj ResultQueryTree where
+  pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
+  pr (SimpleRQT a b c) = "{:select " ++ pr a ++ " :from " ++  pr b ++ " :where " ++ pr c ++ "}"
+
+instance PrClj SomeNumber where
+  pr (Left x) = show x
+  pr (Right x) = show x
 
 parseFromClause :: Parser ParsedFromClause
 parseFromClause =
@@ -269,14 +299,18 @@ parseFromClause =
     ps = ps2 <|> ps1 <|> ps3
     ps1 = do {x <- parseTableName;
               return (x, Right x)}
-    ps2 = do {x <- parseTableName;
+    ps2 = do {tName <- parseTableName;
+              spaces;
               _ <- string "AS";
-              y <- parseTableAlias;
-              return (x, Right y)}
-    ps3 = do {t <- parseQuery;
+              spaces;
+              tAlias <- parseTableAlias;
+              return (tAlias, Right tName)}
+    ps3 = do {tQuery <- parseQuery;
+              spaces;
               _ <- string "AS";
-              a <- parseTableAlias;
-              return (a, Left t)}
+              spaces;
+              tAlias <- parseTableAlias;
+              return (tAlias, Left tQuery)}
 
 
 parseColumnAlias :: Parser ColumnAlias
@@ -396,10 +430,15 @@ parseQuery :: Parser ParsedQueryTree
 parseQuery =
   do
     _<-string "SELECT";
+    spaces;
     selectClause <- parseSelectClause
+    spaces;
     _<-string "FROM";
+    spaces;
     fromClause <- parseFromClause
+    spaces;
     _<-string "WHERE";
+    spaces;
     whereClause <- parseWhereClause
     return (PQT selectClause fromClause whereClause)
 
@@ -473,7 +512,7 @@ compToCompOrder (CLEQ _ _) = CLEQ
 
   -- try to produce left aligned conditions.
 maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeNumber)
-maybeLeftAlign t = f a b --x = undefined -- visitComp f x
+maybeLeftAlign t = f a b
   where
     f (Read c) x = case maybeEvalMath x of
       Just (Left d)  -> Just $ compToCompOrder t c $ Left d
@@ -574,6 +613,12 @@ prepareWhereClause tree = rrr
                                         Just bb -> (Just $ conjunction (convertBack aa) bb, m)
 
 
+mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
+mapAssoc2 k1 k2 v m = case M.lookup k1 m of
+  Nothing -> M.insert k1 (M.insert k2 v M.empty) m
+  Just m2 -> M.insert k1 (M.insert k2 v m2)      m
+
+
 processTreeSimple :: M.Map ColumnAlias ColumnName
   -> TableName -> PosCNF (CompOrder ColumnName SomeNumber)  -> ResultQueryTree
 processTreeSimple = SimpleRQT
@@ -583,20 +628,71 @@ processTree :: ParsedQueryTree -> ResultQueryTree
 processTree (PQT columnMap tableMap whereClause) =
   case M.assocs tableMap of
     [(tAlias, Right tName)] ->
-      if [tAlias] == nub ( map (\(CQ c _) -> c) $ M.elems columnMap)
-      then processTreeSimple cMap tName cnf
-      else error "Unexpected table aliases in column map."
-      where cMap       = M.map (\(CQ _ columnName) -> columnName) columnMap
+      if [tAlias] /= nub ( map (\(CQ c _) -> c) $ M.elems columnMap)
+      then error $ "Unexpected table aliases in column map." ++ tAlias
+      else case whereJoin of
+             Nothing -> processTreeSimple cMap tName cnf
+             (Just joinClause) -> parent
+               where
+                 child = SimpleRQT cMap tName cnf
+                 parent  = NestedRQT pc m parentJoin
+                 pc = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
+                 m = M.insert tAlias child M.empty
+                 parentJoin =  joinClause -- maybe rework it?
+      where cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
+            -- Nothing -> no filtering just joining in WHERE clause.
             (Just cnf) = M.lookup tAlias whereMap -- maybe alias for full table name too.
-    _  -> undefined whereJoin whereMap
-    -- create subrequests for each table and move conditions to these levels.
-    -- -- if val is str (not table obj -> create table obj)
-    -- -- if val is table obj -> conjoin corresponding where clause
-    -- --
-    --
-    --
+    _  -> NestedRQT columnMap ts joinConditions
+      where
+        -- alternativ strategiak:
+        -- megnezzuk h van-e join elem?? -> ha nincs akkor
+        -- ha nincs es csak egy tabla van -> single item letrehoz.
+        -- ha van es tobb tabla van -> felosztasos jatek.
+
+        -- if missing -> nothing to join on
+        (Just joinConditions) = whereJoin
+
+        ts :: M.Map TableAlias ResultQueryTree
+        ts = M.mapWithKey makeSubTable tableMap
+
+        aliasToQualified ::ColumnAlias -> ColumnQualified
+        aliasToQualified x = cq
+          where (Just cq) = M.lookup x columnMap
+
+        makeSubTable :: TableAlias -> Either ParsedQueryTree TableName -> ResultQueryTree
+        makeSubTable sTabAlias (Left pqt) =
+          -- if there are conditions to add to this branch, add them.
+          case M.lookup sTabAlias whereMap of
+            Nothing -> processTree pqt
+            (Just cnf) ->
+              case processTree pqt of
+                (NestedRQT as tsm cnf2) ->
+                  -- TODO: test this (is aliases need to be resolved or something.)
+                  NestedRQT as tsm (conjunction cnf2
+                                    (mapPosCnfLiterals (mapComp (Read . aliasToQualified )numberToMathExpr) cnf)
+                                   )
+                (SimpleRQT as tsm cnf2) -> SimpleRQT as tsm (conjunction cnf cnf2)
+        makeSubTable sTabAlias (Right subTableName) = SimpleRQT colAliases subTableName cnf
+          where
+            -- if Nothing then subtable is a SELECT * expression which is illegal.
+            cnf :: PosCNF (CompOrder ColumnName SomeNumber)
+            (Just cnf) = M.lookup sTabAlias whereMap
+
+            -- if Nothing then subtable has no column names in SELECT
+            colAliases :: M.Map ColumnAlias ColumnName
+            (Just colAliases) = M.lookup sTabAlias subTableColAliases
+
   where
     (whereJoin, whereMap) = prepareWhereClause whereClause
 
+    subTableColAliases :: M.Map TableAlias (M.Map ColumnAlias ColumnName)
+    subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
+                           M.empty columnMap
+
+
+doParse :: String -> ResultQueryTree
+doParse s = case tryParser s parseQuery of
+  (Left a) -> error $ show a
+  (Right tree) -> processTree tree
 
 -- END
