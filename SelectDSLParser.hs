@@ -10,8 +10,11 @@ module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..)
              ColumnQualified(..), CompOrder(..), PrClj(..),
              parseColumnEitherQualified, tryParser, handleLine, main) where
 
-import qualified Data.Set as S (Set, union, empty, insert, elems, fromList,map, null)
-import qualified Data.Map.Strict as M (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey, elems, member)
+import qualified Data.Set as S
+  (Set, union, empty, insert, elems, fromList,map, null)
+import qualified Data.Map.Strict as M
+  (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
+    mapWithKey, traverseWithKey, elems, member)
 
 import Control.Monad
 
@@ -20,8 +23,8 @@ import Data.List (intercalate)
 import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (mempty, mappend)
 
-
-import Text.Parsec as TP (chainl1, (<|>), string,runParser, ParseError,  spaces, try)
+import Text.Parsec as TP
+  (chainl1, (<|>), string,runParser, ParseError, spaces, try)
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
@@ -105,7 +108,9 @@ instance (PrClj a) => PrClj (PosCNF a) where
       f (PosC c) = "[" ++ unwords (map pr (S.elems c)) ++ "]"
 
 instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
-  pr m = "{" ++ (intercalate ", " $ map (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m) ++ "}"
+  pr m = "{"
+    ++ intercalate ", " (map (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m)
+    ++ "}"
 
 
 someNumberMathExpr :: SomeNumber -> MathExpr a
