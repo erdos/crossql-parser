@@ -102,9 +102,9 @@ instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
 
 
 instance (PrClj a) => PrClj (PosCNF a) where
-  pr (PosClauses cs) = "(and " ++ unwords (map f $ S.elems cs) ++ ")"
+  pr (PosClauses cs) = "(cnf " ++ unwords (map f $ S.elems cs) ++ ")"
     where
-      f (PosC c) = "(or " ++ unwords (map pr (S.elems c)) ++ ")"
+      f (PosC c) = "[" ++ unwords (map pr (S.elems c)) ++ "]"
 
 instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
   pr m = "{" ++ (intercalate ", " $ map (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m) ++ "}"
