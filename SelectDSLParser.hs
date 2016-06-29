@@ -304,18 +304,10 @@ parseFromClause =
     ps = try ps2 <|> ps1 <|> ps3
     ps1 = do {x <- parseTableName;
               return (x, Right x)}
-    ps2 = do {tName <- parseTableName;
-              spaces;
-              _ <- string "AS";
-              spaces;
-              tAlias <- parseTableAlias;
+    ps2 = do {(tAlias, tName) <- parseAsPair parseTableName parseTableAlias;
               return (tAlias, Right tName)}
-    ps3 = do {tQuery <- parseQuery;
-              spaces;
-              _ <- string "AS";
-              spaces;
-              tAlias <- parseTableAlias;
-              return (tAlias, Left tQuery)}
+    ps3 = do {(tAlias, tQuery) <- parseAsPair parseQuery parseTableAlias;
+               return (tAlias, Left tQuery)}
 
 
 parseColumnAlias :: Parser ColumnAlias
@@ -366,13 +358,7 @@ parseSelectClause =
     parseWithoutAlias = do {qualified@(CQ table column) <- parseColumnQualified;
                 return (table ++ "." ++ column, qualified)}
     -- alias is given.
-    parseWithAlias = do {pq <- parseColumnQualified;
-                spaces;
-                _ <- string "AS";
-                spaces;
-                ali <- parseColumnAlias;
-                return (ali, pq)
-              }
+    parseWithAlias = parseAsPair parseColumnQualified parseColumnAlias
 
 
 parseMathExpr :: Parser a -> Parser (MathExpr a)
@@ -443,6 +429,17 @@ parseAliasedQuery =
 --data LogicTree_Disjunction a = AndD (LogicTree_Disjunction a) | NotD a | LeafD a
 --	deriving (Eq)
 
+-- warning: returns reverse pair!
+parseAsPair ::Parser a -> Parser b -> Parser (b, a)
+parseAsPair pa pb =
+  do
+    a <- pa
+    spaces;
+    _ <- try (string "AS") <|> string "As" <|> string "as"
+    spaces;
+    b <- pb
+    return (b, a)
+
 -- todo: maybe also support subQuery
 parseSimpleQuery :: Parser ParsedQueryTree
 parseSimpleQuery =
@@ -459,7 +456,9 @@ parseSimpleQuery =
     spaces;
     whereClause <- parseLogicTree $ parseComp $ parseMathExpr parseColumnName;
     let tableName = getTableName fromTable in
-      return $ PQT (toSelectClause tableName selectClause) (toFromClause fromTable) (toWhereClause tableName whereClause)
+      return $ PQT (toSelectClause tableName selectClause)
+                   (toFromClause fromTable)
+                   (toWhereClause tableName whereClause)
   where
     getTableName (Left _) = "$"
     getTableName (Right t) = t
@@ -484,14 +483,7 @@ parseSimpleQuery =
     part = try parseWithAlias <|> parseWithoutAlias
 
     parseWithoutAlias = do {q <- parseColumnName; return (q, q)}
-    parseWithAlias = do {cn <- parseColumnName;
-                         spaces;
-                         _ <- string "AS";
-                         spaces;
-                         ca <- parseColumnAlias;
-                         return (ca, cn)
-                        }
-
+    parseWithAlias = parseAsPair parseColumnName parseColumnAlias
 
 -- a Clause is a disjunction of positive and negatives items.
 data Clause a = PosNeg (S.Set a) (S.Set a) deriving (Eq, Show, Read, Ord)
