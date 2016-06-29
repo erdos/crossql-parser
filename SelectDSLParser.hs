@@ -5,7 +5,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SelectDSLParser (
+module Main (
    MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
    ColumnQualified(..), CompOrder(..), PrClj(..), main,
    parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
@@ -19,14 +19,17 @@ import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, 
 import Control.Monad
 
 import Data.Either()
-import Data.List(nub)
+import Data.List(nub, intercalate)
 
-import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces)
+import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces, try)
 import Text.Parsec.Combinator (option)
+import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
+--import System.IO(stdin)
+--import GHC.IO.Handle(hDuplicate)
 
 data Column = ColName deriving (Eq, Show, Ord)
 
@@ -60,6 +63,11 @@ mapMathExpr _ (I i) = (I i)
 class PrClj a where
   pr :: a -> String
 
+instance PrClj ParseError where
+  pr pe = "{:messages " ++ concatMap f (errorMessages pe) ++ "}"
+    where f (Expect x) = show x
+          f (UnExpect x) = show x
+          f _ = "_"
 
 instance (PrClj a) => PrClj (MathExpr a) where
   pr (D d) = show d
@@ -99,7 +107,7 @@ instance (PrClj a) => PrClj (PosCNF a) where
       f (PosC c) = "(or " ++ unwords (map pr (S.elems c)) ++ ")"
 
 instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
-  pr m = "{" ++ (concatMap (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m) ++ "}"
+  pr m = "{" ++ (intercalate ", " $ map (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m) ++ "}"
 
 
 someNumberMathExpr :: SomeNumber -> MathExpr a
@@ -213,12 +221,12 @@ parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
   where
     op :: Parser (a -> a -> Comp a)
     x p q = string p >> return q
-    op =  x "<=" CSEQ
-      <|> x ">=" CLEQ
-      <|> x "==" CEQ
-      <|> x "!=" CNEQ
+    op =  try (x "<=" CSEQ)  -- we need try to enforce backtracking
+      <|> try (x ">=" CLEQ)  -- because some patterns share same prefix
       <|> x "<" CST
       <|> x ">" CLT
+      <|> x "==" CEQ
+      <|> x "!=" CNEQ
 
 
 elemsCompOrder :: CompOrder a b -> (a,b)
@@ -290,6 +298,7 @@ instance PrClj SomeNumber where
   pr (Left x) = show x
   pr (Right x) = show x
 
+
 parseFromClause :: Parser ParsedFromClause
 parseFromClause =
   do { xs <- commaSep1 haskell ps;
@@ -328,16 +337,6 @@ parseTableAlias = identifier haskell
 parseTableName :: Parser TableName
 parseTableName = identifier haskell
 
-  -- x <- TPT.reserved "SELECT";
-
---parseColumnName :: Parser ColumnName
---parseColumnName = TP.many1 TPC.letter
-
---parseColumnAlias :: Parser ColumnAlias
---parseColumnAlias = TP.many1 TPC.letter
-
---parseTableAlias :: Parser TableAlias
---parseTableAlias = TP.many1 TPC.letter
 
 parseColumnEitherQualified :: Parser ColumnEitherQualified
 parseColumnEitherQualified = do {
@@ -366,12 +365,12 @@ parseSelectClause =
        return $ M.fromList xs}
   where
     part :: Parser (ColumnAlias, ColumnQualified)
-    part = part2 <|> part1
+    part = try parseWithAlias <|> parseWithoutAlias
     -- no alias is given: alis will be full qualified name with dot.
-    part1 = do {qualified@(CQ table column) <- parseColumnQualified;
+    parseWithoutAlias = do {qualified@(CQ table column) <- parseColumnQualified;
                 return (table ++ "." ++ column, qualified)}
     -- alias is given.
-    part2 = do {pq <- parseColumnQualified;
+    parseWithAlias = do {pq <- parseColumnQualified;
                 spaces;
                 _ <- string "AS";
                 spaces;
@@ -410,10 +409,11 @@ parseLogicTree pa = _start
     _start = _or
     _or  = chainl1 _and (ss "or" Or)
     _and = chainl1 _ll   (ss "and" And)
-    _not = do {spaces; _<-string "not"; x<-_ll; return $ Not x}
+    _not = do {_<-string "not"; spaces; x<-_ll; return $ Not x}
     _pp  = do {spaces; x <- pa; return $ Leaf x}
     _ll  = parens haskell _start <|> _not <|> _pp
 
+-- tryParser "a and not c or b" (parseLogicTree parseColumnName)
 
 parseWhereClause :: Parser ParsedWhereClause
 parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnQualified
@@ -535,10 +535,6 @@ tryParser :: String -> Parser a -> Either ParseError a
 tryParser s p = runParser p () "" s
 
 
-main :: IO ()
-main = undefined
-
-
 groupMapBy :: (Ord k) => (a -> k) -> [a] -> M.Map k [a]
 groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
 
@@ -546,7 +542,6 @@ groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
 maybeAllMapToSame :: (Eq k) => (a->k) -> [a] -> Maybe k
 maybeAllMapToSame _ [] = Nothing
 maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Nothing
-
 
 
 -- given cnf -> collects clauses with same table alias on left side. (and rest clauses)
@@ -623,6 +618,7 @@ processTreeSimple :: M.Map ColumnAlias ColumnName
   -> TableName -> PosCNF (CompOrder ColumnName SomeNumber)  -> ResultQueryTree
 processTreeSimple = SimpleRQT
 
+
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> ResultQueryTree
 processTree (PQT columnMap tableMap whereClause) =
@@ -644,48 +640,35 @@ processTree (PQT columnMap tableMap whereClause) =
             (Just cnf) = M.lookup tAlias whereMap -- maybe alias for full table name too.
     _  -> NestedRQT columnMap ts joinConditions
       where
-        -- alternativ strategiak:
-        -- megnezzuk h van-e join elem?? -> ha nincs akkor
-        -- ha nincs es csak egy tabla van -> single item letrehoz.
-        -- ha van es tobb tabla van -> felosztasos jatek.
-
-        -- if missing -> nothing to join on
-        (Just joinConditions) = whereJoin
+        (Just joinConditions) = whereJoin -- if missing -> no join confition
 
         ts :: M.Map TableAlias ResultQueryTree
         ts = M.mapWithKey makeSubTable tableMap
 
-        aliasToQualified ::ColumnAlias -> ColumnQualified
-        aliasToQualified x = cq
-          where (Just cq) = M.lookup x columnMap
-
         makeSubTable :: TableAlias -> Either ParsedQueryTree TableName -> ResultQueryTree
         makeSubTable sTabAlias (Left pqt) =
-          -- if there are conditions to add to this branch, add them.
           case M.lookup sTabAlias whereMap of
             Nothing -> processTree pqt
             (Just cnf) ->
               case processTree pqt of
                 (NestedRQT as tsm cnf2) ->
-                  -- TODO: test this (is aliases need to be resolved or something.)
                   NestedRQT as tsm (conjunction cnf2
-                                    (mapPosCnfLiterals (mapComp (Read . aliasToQualified )numberToMathExpr) cnf)
-                                   )
+                   (mapPosCnfLiterals (mapComp (Read . aliasToQualified )numberToMathExpr) cnf))
                 (SimpleRQT as tsm cnf2) -> SimpleRQT as tsm (conjunction cnf cnf2)
         makeSubTable sTabAlias (Right subTableName) = SimpleRQT colAliases subTableName cnf
           where
-            -- if Nothing then subtable is a SELECT * expression which is illegal.
             cnf :: PosCNF (CompOrder ColumnName SomeNumber)
             (Just cnf) = M.lookup sTabAlias whereMap
 
-            -- if Nothing then subtable has no column names in SELECT
             colAliases :: M.Map ColumnAlias ColumnName
             (Just colAliases) = M.lookup sTabAlias subTableColAliases
-
   where
-    (whereJoin, whereMap) = prepareWhereClause whereClause
 
-    subTableColAliases :: M.Map TableAlias (M.Map ColumnAlias ColumnName)
+    aliasToQualified ::ColumnAlias -> ColumnQualified
+    aliasToQualified x = cq
+      where (Just cq) = M.lookup x columnMap
+
+    (whereJoin, whereMap) = prepareWhereClause whereClause
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
                            M.empty columnMap
 
@@ -694,5 +677,19 @@ doParse :: String -> ResultQueryTree
 doParse s = case tryParser s parseQuery of
   (Left a) -> error $ show a
   (Right tree) -> processTree tree
+
+
+-- TODO: Date support.
+
+handleLine :: String -> IO ()
+handleLine line =
+  case runParser parseQuery () "" line of
+    (Left _) ->  putStrLn ":error"--putStrLn $ pr a
+    (Right b) -> putStrLn $ pr $ processTree b
+
+main :: IO ()
+main = do
+  c <- getContents;
+  forM_ (lines c) handleLine
 
 -- END
