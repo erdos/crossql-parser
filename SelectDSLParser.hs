@@ -260,6 +260,10 @@ type ColumnMap         = M.Map ColumnAlias ColumnQualified
 type ParsedFromClause  = M.Map TableAlias (Either ParsedQueryTree TableName)
 type ParsedWhereClause = LogicTree (Comp (MathExpr ColumnQualified))
 
+collectCQ :: ParsedWhereClause -> [ColumnQualified]
+collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . getCompSides) $ foldMap (:[]) w
+
+
 -- get it from parser
 data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause deriving (Eq, Show)
 
@@ -668,15 +672,22 @@ processTree (PQT columnMap tableMap whereClause)
   -- | ha columnMap table aliasok != tableMap kulcsok -> halal.
   -- | ha whereMap table aliasok != tablaMap kulcsok -> halal.
 
-  | (Just t) <- msum $ fmap (\(CQ t _) -> if not $ M.member t tableMap then Just t else Nothing)  (collectCQ whereClause)
+  -- and unknown table alias is used in a WHERE condition
+  | (Just t) <- msum $ fmap (\(CQ t _) ->
+                                if not $ M.member t tableMap
+                                then Just t else Nothing)  (collectCQ whereClause)
   = Left $ PE $ "Unexpected table name in WHERE clause: " ++ t
+
   -- an unknown table alias is used in SELECT clause
-  | (Just t) <-  msum (fmap (\(CQ t _) -> if not $ M.member t tableMap then Just t else Nothing) (M.elems columnMap))
+  | (Just t) <-  msum (fmap (\(CQ t _) ->
+                               if not $ M.member t tableMap
+                               then Just t else Nothing) (M.elems columnMap))
     = Left $ PE $ "Unecpected table name in SELECT clause: " ++ t
-  -- | (Just t) <- msum (fmap )
+
   --- => SELECT ... FROM tname WHERE ...
   | [(tAlias, Right tName)] <- M.assocs tableMap,
-    (Just cnf)              <- M.lookup tAlias whereMap -- maybe alias for full table name too.
+    (Just cnf)              <- M.lookup tAlias whereMap
+                               -- maybe alias for full table name too.
   = case whereJoin of
       Nothing -> Right $ processTreeSimple cMap tName cnf
       (Just joinClause) -> Right parent
@@ -703,7 +714,8 @@ processTree (PQT columnMap tableMap whereClause)
               m      = M.insert tAlias child M.empty
               parentJoin =  joinClause -- maybe rework it?
 -}
- --- => SELECT t1, ... FROM ... WHERE
+
+  --- => SELECT t1, ... FROM ... WHERE
   | [(tAlias, Right tName)] <- M.assocs tableMap,
     Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
@@ -764,6 +776,3 @@ main = do
   forM_ (lines c) handleLine
 
 -- END
-
-collectCQ :: ParsedWhereClause -> [ColumnQualified]
-collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . getCompSides) $ foldMap (:[]) w
