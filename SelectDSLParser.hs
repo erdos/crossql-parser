@@ -17,6 +17,7 @@ import qualified Data.Map.Strict as M
     mapWithKey, traverseWithKey, elems, member)
 
 import Control.Monad
+import Control.Applicative ((<$>))
 
 import Data.Either()
 import Data.List (intercalate)
@@ -296,9 +297,7 @@ instance PrClj SomeNumber where
 
 
 parseFromClause :: Parser ParsedFromClause
-parseFromClause =
-  do { xs <- commaSep1 haskell ps;
-       return $ M.fromList xs}
+parseFromClause = M.fromList <$> commaSep1 haskell ps
   where
     ps :: Parser (TableAlias, Either ParsedQueryTree TableName)
     ps = try ps2 <|> ps1 <|> ps3
@@ -348,15 +347,13 @@ parseColumnQualified = do {
 -- map of alias to equalified.
 -- creates dummy alias keys when not given.
 parseSelectClause :: Parser ColumnMap
-parseSelectClause =
-  do { xs <- commaSep1 haskell part;
-       return $ M.fromList xs}
+parseSelectClause = M.fromList <$> commaSep1 haskell part
   where
     part :: Parser (ColumnAlias, ColumnQualified)
     part = try parseWithAlias <|> parseWithoutAlias
     -- no alias is given: alis will be full qualified name with dot.
     parseWithoutAlias = do {qualified@(CQ table column) <- parseColumnQualified;
-                return (table ++ "." ++ column, qualified)}
+                            return (table ++ "." ++ column, qualified)}
     -- alias is given.
     parseWithAlias = parseAsPair parseColumnQualified parseColumnAlias
 
@@ -474,7 +471,8 @@ parseSimpleQuery =
     --toWhereClause = undefined
 
     parseFrom :: Parser (Either ParsedQueryTree TableName)
-    parseFrom = try (do {x <- parseTableName; return $ Right x})  <|> do {x <- parens haskell parseQuery; return $ Left x}
+    parseFrom = try  (Right <$> parseTableName)
+                <|>  (Left <$> parens haskell parseQuery)
 
     parseSelect :: Parser [(ColumnAlias, ColumnName)]
     parseSelect = commaSep1 haskell part
