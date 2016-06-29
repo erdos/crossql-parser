@@ -2,8 +2,11 @@
 __A minimalist SQL Select query parser__
 
 **Requirements**
-- GHC: `Glasgow Haskell Compiler, Version 7.8.4`
-- Parsec module
+
+| name | package | version | description |
+-------------------
+| GHC | `ghc` | `7.8.5` | Glasgow Haskell Compiler                 |
+| Parsec | `ghc-parsec-devel`, `ghc-parsec` | `` | parsec library  |
 
 **Execute**
 1. build: `ghc SelectDSLParser.hs`
