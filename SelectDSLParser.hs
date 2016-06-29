@@ -1,7 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+--{-# LANGUAGE ScopedTypeVariables #-}
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
@@ -10,7 +11,7 @@ module Main (
    ColumnQualified(..), CompOrder(..), PrClj(..), main,
    parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
    maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1,
-   mapMathExpr
+   parseSimpleQuery
    ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
@@ -42,22 +43,12 @@ data MathExpr a = D Double | I Integer | Read a
                 | Div (MathExpr a) (MathExpr a)
                 | Pow (MathExpr a) (MathExpr a)
                 | Log (MathExpr a)
-	        deriving (Eq, Show, Ord)
+                deriving (Eq, Show, Ord, Functor)
+
 
 numberToMathExpr :: SomeNumber -> MathExpr a
 numberToMathExpr (Left i) = I i
 numberToMathExpr (Right d) = D d
-
-mapMathExpr :: (a->b) -> MathExpr a -> MathExpr b
-mapMathExpr f (Read x) = Read $ f x
-mapMathExpr f (Add a b) = Add (mapMathExpr f a) (mapMathExpr f b)
-mapMathExpr f (Sub a b) = Sub (mapMathExpr f a) (mapMathExpr f b)
-mapMathExpr f (Mul a b) = Mul (mapMathExpr f a) (mapMathExpr f b)
-mapMathExpr f (Div a b) = Div (mapMathExpr f a) (mapMathExpr f b)
-mapMathExpr f (Pow a b) = Pow (mapMathExpr f a) (mapMathExpr f b)
-mapMathExpr f (Log a) = Log (mapMathExpr f a)
-mapMathExpr _ (D d) = (D d)
-mapMathExpr _ (I i) = (I i)
 
 
 class PrClj a where
@@ -399,8 +390,10 @@ data LogicTree a = And (LogicTree a) (LogicTree a)
                  | Or (LogicTree a) (LogicTree a)
                  | Not (LogicTree a)
                  | Leaf a
-	deriving (Eq, Show, Ord)
+                 deriving (Eq, Show, Ord, Functor)
 
+--instance Functor LogicTree where
+--  fmap f x = undefined
 
 parseLogicTree :: Parser a -> Parser (LogicTree a)
 parseLogicTree pa = _start
@@ -445,11 +438,35 @@ parseQuery =
 --data LogicTree_Disjunction a = AndD (LogicTree_Disjunction a) | NotD a | LeafD a
 --	deriving (Eq)
 
+parseSimpleQuery :: Parser ParsedQueryTree
+parseSimpleQuery =
+  do
+    _ <- string "SELECT"
+    spaces;
+    selectClause <- commaSep1 haskell parseColumnName
+    spaces;
+    _ <- string "FROM"
+    spaces;
+    fromTable <- parseTableName;
+    spaces;
+    _ <- string "WHERE"
+    spaces;
+    whereClause <- parseLogicTree $ parseComp $ parseMathExpr parseColumnName;
+    return $ PQT (toSelectClause fromTable selectClause) (toFromClause fromTable) (toWhereClause fromTable whereClause)
+  where
+    toFromClause :: TableName -> ParsedFromClause
+    toFromClause tn = M.insert tn (Right tn) M.empty
+
+    toSelectClause :: TableAlias -> [ColumnName] -> ColumnMap
+    toSelectClause t = foldl (\m c -> M.insert c (CQ t c) m) M.empty
+
+    toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
+    toWhereClause t = fmap (mapComp1 (fmap (\x -> CQ t x)))
+    --toWhereClause = undefined
+
 -- a Clause is a disjunction of positive and negatives items.
-data Clause a = PosNeg (S.Set a) (S.Set a)
-	deriving (Eq, Show, Read, Ord)
-data CNF a = Clauses (S.Set (Clause a))
-	deriving (Eq, Show,Read, Ord)
+data Clause a = PosNeg (S.Set a) (S.Set a) deriving (Eq, Show, Read, Ord)
+data CNF a = Clauses (S.Set (Clause a)) deriving (Eq, Show,Read, Ord)
 
 
 oneset :: (Ord a) => a -> S.Set a
@@ -494,7 +511,7 @@ toPosCnf (Clauses cs) = PosClauses (S.map f cs)
 collectPosCnfLiterals :: PosCNF a -> [a]
 collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
 
-
+-- like `fmap` for PosCNF
 mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
 mapPosCnfLiterals f (PosClauses cs) =
   PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
