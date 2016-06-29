@@ -30,7 +30,7 @@ __An SQL query rewrite engine__
 
 The output is hierarchic maps in single line EDN format. One map can be simple or nested.
 
-1. Map syntax:
+#### Map syntax:
 
 ```
 {:select SELECT, :from FROM, :where WHERE}
@@ -48,7 +48,7 @@ On nested maps:
 - *FROM*: Map of subqueries. Keys are table aliases (symbol), values are subquery maps.
 - *WHERE*: CNF of unsafe literals (nualigned relations of math expressions on column names).
 
-2. CNF syntax:
+#### CNF syntax:
 
 The parser transforms all math formulas to positive CNF format. This is a _Conjuctive Normal Form_ with only positive literals. Every literal is a relation (see later).
 
@@ -56,15 +56,15 @@ An EDN representation of a CNF is in the form:
 `(cnf [lit-1-1 lit-1-2 ... lit-1-n] [lit-2-1 lit-2-2 ... lit-2-k] ...)`.
 The top level represents a conjunction and the vectors represent the disjunction of literals.
 
-3. Relations:
+#### Relations:
 
 The following relations are supported: `<`, `<=`, `>`, `>=`, `==`, `!=`
 
-4. Numbers
+#### Numbers
 
 The following number formats are supported: signed/unsigned long/double
 
-5. Column names
+#### Column names
 
 A column name is a simple identifier as a symbol. A qualified column name has both a table alias (as symbol namespace) and a column alias (symbol name) in `table-alias/column-alias` format. Column names without `/` are unqualified.
 
