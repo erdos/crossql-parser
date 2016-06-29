@@ -9,18 +9,21 @@
 module Main (
    MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
    ColumnQualified(..), CompOrder(..), PrClj(..), main,
-   parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
-   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1,
-   parseSimpleQuery
+   parseQuery, processTree,  parseColumnEitherQualified, tryParser,
+   maybeEquation,visitComp,  mapComp1,
+   parseSimpleQuery, collectPosCnfLiterals, collectCQ
    ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
-import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey)
+import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey, elems, member)
 
 import Control.Monad
 
 import Data.Either()
 import Data.List(intercalate)
+import Data.Foldable(Foldable, foldMap)
+import Data.Monoid (mempty, mappend)
+
 
 import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces, try)
 import Text.Parsec.Combinator (option)
@@ -44,6 +47,17 @@ data MathExpr a = D Double | I Integer | Read a
                 | Pow (MathExpr a) (MathExpr a)
                 | Log (MathExpr a)
                 deriving (Eq, Show, Ord, Functor)
+
+instance Foldable MathExpr where
+  foldMap f (Read x) = f x
+  foldMap _ (I _) = mempty
+  foldMap _ (D _) = mempty
+  foldMap f (Add a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Sub a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Mul a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Div a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Pow a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Log a) = foldMap f a
 
 
 numberToMathExpr :: SomeNumber -> MathExpr a
@@ -151,17 +165,6 @@ maybeEvalMath (Log a) = liftM op (maybeEvalMath a)
     op (Left i) = Right $ log $ fromIntegral i
     op (Right d) = Right $ log d
 
-
-collectReads :: MathExpr a -> [a]
-collectReads (Read a) = [a]
-collectReads (Add a b) = collectReads a ++ collectReads b
-collectReads (Sub a b) = collectReads a ++ collectReads b
-collectReads (Mul a b) = collectReads a ++ collectReads b
-collectReads (Div a b) = collectReads a ++ collectReads b
-collectReads (Pow a b) = collectReads a ++ collectReads b
-collectReads (Log a) = collectReads a
-collectReads _ = []
-
 -- COMPARISON OPERATOR
 
 data CompOrder a b = CST a b
@@ -261,8 +264,8 @@ type TableAlias = String
 type ColumnEitherQualified = Either ColumnQualified ColumnAlias
 
 type ColumnMap         = M.Map ColumnAlias ColumnQualified
-type ParsedFromClause  = (M.Map TableAlias (Either ParsedQueryTree TableName))
-type ParsedWhereClause = (LogicTree (Comp (MathExpr ColumnQualified)))
+type ParsedFromClause  = M.Map TableAlias (Either ParsedQueryTree TableName)
+type ParsedWhereClause = LogicTree (Comp (MathExpr ColumnQualified))
 
 -- get it from parser
 data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause deriving (Eq, Show)
@@ -392,8 +395,13 @@ data LogicTree a = And (LogicTree a) (LogicTree a)
                  | Leaf a
                  deriving (Eq, Show, Ord, Functor)
 
---instance Functor LogicTree where
---  fmap f x = undefined
+instance Foldable LogicTree where
+  foldMap f (Leaf x) = f x
+  foldMap f (And a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Or a b) = foldMap f a `mappend` foldMap f b
+  foldMap f (Not a)  = foldMap f a
+
+  --  fmap f x = undefined
 
 parseLogicTree :: Parser a -> Parser (LogicTree a)
 parseLogicTree pa = _start
@@ -411,16 +419,11 @@ parseLogicTree pa = _start
 parseWhereClause :: Parser ParsedWhereClause
 parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnQualified
 
-
-collectLeaves :: LogicTree t -> [t]
-collectLeaves (Leaf a) = [a]
-collectLeaves (Not a) = collectLeaves a
-collectLeaves (And a b) = collectLeaves a ++ collectLeaves b
-collectLeaves (Or a b) = collectLeaves a ++ collectLeaves b
-
-
 parseQuery :: Parser ParsedQueryTree
-parseQuery =
+parseQuery = try parseSimpleQuery <|> parseAliasedQuery
+
+parseAliasedQuery :: Parser ParsedQueryTree
+parseAliasedQuery =
   do
     _<-string "SELECT";
     spaces;
@@ -438,31 +441,55 @@ parseQuery =
 --data LogicTree_Disjunction a = AndD (LogicTree_Disjunction a) | NotD a | LeafD a
 --	deriving (Eq)
 
+-- todo: maybe also support subQuery
 parseSimpleQuery :: Parser ParsedQueryTree
 parseSimpleQuery =
   do
     _ <- string "SELECT"
     spaces;
-    selectClause <- commaSep1 haskell parseColumnName
+    selectClause <- parseSelect
     spaces;
     _ <- string "FROM"
     spaces;
-    fromTable <- parseTableName;
+    fromTable <- parseFrom;
     spaces;
     _ <- string "WHERE"
     spaces;
     whereClause <- parseLogicTree $ parseComp $ parseMathExpr parseColumnName;
-    return $ PQT (toSelectClause fromTable selectClause) (toFromClause fromTable) (toWhereClause fromTable whereClause)
+    let tableName = getTableName fromTable in
+      return $ PQT (toSelectClause tableName selectClause) (toFromClause fromTable) (toWhereClause tableName whereClause)
   where
-    toFromClause :: TableName -> ParsedFromClause
-    toFromClause tn = M.insert tn (Right tn) M.empty
+    getTableName (Left _) = "$"
+    getTableName (Right t) = t
 
-    toSelectClause :: TableAlias -> [ColumnName] -> ColumnMap
-    toSelectClause t = foldl (\m c -> M.insert c (CQ t c) m) M.empty
+    toFromClause :: Either ParsedQueryTree TableName -> ParsedFromClause
+    toFromClause x = M.insert (getTableName x) x M.empty
+
+    toSelectClause :: TableAlias -> [(ColumnAlias, ColumnName)] -> ColumnMap
+    toSelectClause t = foldl (\m (a,c) -> M.insert a (CQ t c) m) M.empty
 
     toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
-    toWhereClause t = fmap (mapComp1 (fmap (\x -> CQ t x)))
+    toWhereClause t = fmap $ mapComp1 $ fmap $ CQ t
     --toWhereClause = undefined
+
+    parseFrom :: Parser (Either ParsedQueryTree TableName)
+    parseFrom = try (do {x <- parseTableName; return $ Right x})  <|> do {x <- parens haskell parseQuery; return $ Left x}
+
+    parseSelect :: Parser [(ColumnAlias, ColumnName)]
+    parseSelect = commaSep1 haskell part
+
+    part :: Parser (ColumnAlias, ColumnName)
+    part = try parseWithAlias <|> parseWithoutAlias
+
+    parseWithoutAlias = do {q <- parseColumnName; return (q, q)}
+    parseWithAlias = do {cn <- parseColumnName;
+                         spaces;
+                         _ <- string "AS";
+                         spaces;
+                         ca <- parseColumnAlias;
+                         return (ca, cn)
+                        }
+
 
 -- a Clause is a disjunction of positive and negatives items.
 data Clause a = PosNeg (S.Set a) (S.Set a) deriving (Eq, Show, Read, Ord)
@@ -498,6 +525,8 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
+collectPosCnfLiterals :: PosCNF a -> [a]
+collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
 
 conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
 conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
@@ -507,9 +536,6 @@ toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
   where f (PosNeg gg hh) = PosC (S.union gg (S.map negateComp hh))
 
-
-collectPosCnfLiterals :: PosCNF a -> [a]
-collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
 
 -- like `fmap` for PosCNF
 mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
@@ -641,11 +667,21 @@ data ProcessError = PE String deriving (Eq, Show, Ord)
 instance PrClj ProcessError where
   pr (PE s) = "{:error " ++ show s ++"}"
 
+
+
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
 processTree (PQT columnMap tableMap whereClause)
   -- | ha columnMap table aliasok != tableMap kulcsok -> halal.
   -- | ha whereMap table aliasok != tablaMap kulcsok -> halal.
+
+  | (Just t) <- msum $ fmap (\(CQ t _) -> if not $ M.member t tableMap then Just t else Nothing)  (collectCQ whereClause)
+  = Left $ PE $ "Unexpected table name in WHERE clause: " ++ t
+  -- an unknown table alias is used in SELECT clause
+  | (Just t) <-  msum (fmap (\(CQ t _) -> if not $ M.member t tableMap then Just t else Nothing) (M.elems columnMap))
+    = Left $ PE $ "Unecpected table name in SELECT clause: " ++ t
+  -- | (Just t) <- msum (fmap )
+  --- => SELECT ... FROM tname WHERE ...
   | [(tAlias, Right tName)] <- M.assocs tableMap,
     (Just cnf)              <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = case whereJoin of
@@ -657,6 +693,24 @@ processTree (PQT columnMap tableMap whereClause)
           pc     = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
           m      = M.insert tAlias child M.empty
           parentJoin =  joinClause -- maybe rework it?
+
+  --- => SELECT ... FROM (SELECT ...) WHERE ...
+  | [(tAlias, Left _)] <- M.assocs tableMap,
+    (Just _)           <- M.lookup tAlias whereMap
+  = case whereJoin of
+      -- outer table has only left-aligned filters -> can be moven inwards.
+      Nothing -> Left $ PE "No JOIN on outer table.."
+      -- outer table has mixed filters.
+      (Just _) -> Left $ PE "not implemented: outer table has mixed filters"
+ {-       case processTree subTable of
+          (Left pe) -> Left pe;
+          (Right child) -> Right $ NestedRQT pc m parentJoin
+            where
+              pc     = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
+              m      = M.insert tAlias child M.empty
+              parentJoin =  joinClause -- maybe rework it?
+-}
+ --- => SELECT t1, ... FROM ... WHERE
   | [(tAlias, Right tName)] <- M.assocs tableMap,
     Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
@@ -700,6 +754,8 @@ processTree (PQT columnMap tableMap whereClause)
                            M.empty columnMap
 
 -- TODO: Date support.
+-- TODO: JOIN ON support.
+-- TODO: equivalence classes on conditions.
 
 handleLine :: String -> IO ()
 handleLine line =
@@ -715,3 +771,6 @@ main = do
   forM_ (lines c) handleLine
 
 -- END
+
+collectCQ :: ParsedWhereClause -> [ColumnQualified]
+collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . getCompSides) $ foldMap (:[]) w
