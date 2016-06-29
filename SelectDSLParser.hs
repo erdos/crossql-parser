@@ -6,34 +6,27 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (
-   MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
-   ColumnQualified(..), CompOrder(..), PrClj(..), main,
-   parseQuery, processTree,  parseColumnEitherQualified, tryParser,
-   maybeEquation,visitComp,  mapComp1,
-   parseSimpleQuery, collectPosCnfLiterals, collectCQ
-   ) where
+module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
+             ColumnQualified(..), CompOrder(..), PrClj(..),
+             parseColumnEitherQualified, tryParser, handleLine, main) where
 
-import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
-import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey, elems, member)
+import qualified Data.Set as S (Set, union, empty, insert, elems, fromList,map, null)
+import qualified Data.Map.Strict as M (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey, elems, member)
 
 import Control.Monad
 
 import Data.Either()
-import Data.List(intercalate)
-import Data.Foldable(Foldable, foldMap)
+import Data.List (intercalate)
+import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (mempty, mappend)
 
 
-import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces, try)
+import Text.Parsec as TP (chainl1, (<|>), string,runParser, ParseError,  spaces, try)
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
-
---import System.IO(stdin)
---import GHC.IO.Handle(hDuplicate)
 
 data Column = ColName deriving (Eq, Show, Ord)
 
@@ -188,13 +181,13 @@ getCompSides (CLT p q) = (p,q)
 getCompSides (CLEQ p q) = (p,q)
 getCompSides (CSEQ p q) = (p,q)
 
-visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
-visitComp f (CST x y) = f CST x y
-visitComp f (CLT x y) = f CLT x y
-visitComp f (CSEQ x y) = f CSEQ x y
-visitComp f (CLEQ x y) = f CLEQ x y
-visitComp f (CEQ x y) = f CEQ x y
-visitComp f (CNEQ x y) = f CNEQ x y
+--visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
+--visitComp f (CST x y) = f CST x y
+--visitComp f (CLT x y) = f CLT x y
+--visitComp f (CSEQ x y) = f CSEQ x y
+--visitComp f (CLEQ x y) = f CLEQ x y
+--visitComp f (CEQ x y) = f CEQ x y
+--visitComp f (CNEQ x y) = f CNEQ x y
 
 
 mapComp :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
@@ -525,8 +518,8 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
-collectPosCnfLiterals :: PosCNF a -> [a]
-collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
+-- collectPosCnfLiterals :: PosCNF a -> [a]
+-- collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
 
 conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
 conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
@@ -569,9 +562,9 @@ maybeLeftAlign t = f a b
     (a, b) = getCompSides t
 
 
-maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
-maybeEquation (CEQ (Read a) (Read b)) = Just (a,b)
-maybeEquation _ = Nothing
+--maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
+--maybeEquation (CEQ (Read a) (Read b)) = Just (a,b)
+--maybeEquation _ = Nothing
 
 
 tryParser :: String -> Parser a -> Either ParseError a
