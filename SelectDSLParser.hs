@@ -9,17 +9,17 @@ module Main (
    MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
    ColumnQualified(..), CompOrder(..), PrClj(..), main,
    parseQuery, processTree, collectReads, parseColumnEitherQualified, tryParser,
-   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1, doParse,
+   maybeEquation,visitComp, collectLeaves, collectPosCnfLiterals,  mapComp1,
    mapMathExpr
    ) where
 
 import qualified Data.Set as S(Set, union, empty, insert, elems, fromList,map, null)
-import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map, elems, mapWithKey)
+import qualified Data.Map.Strict as M(Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,  mapWithKey, traverseWithKey)
 
 import Control.Monad
 
 import Data.Either()
-import Data.List(nub, intercalate)
+import Data.List(intercalate)
 
 import Text.Parsec as TP( chainl1, (<|>), string,runParser, ParseError,  spaces, try)
 import Text.Parsec.Combinator (option)
@@ -305,7 +305,7 @@ parseFromClause =
        return $ M.fromList xs}
   where
     ps :: Parser (TableAlias, Either ParsedQueryTree TableName)
-    ps = ps2 <|> ps1 <|> ps3
+    ps = try ps2 <|> ps1 <|> ps3
     ps1 = do {x <- parseTableName;
               return (x, Right x)}
     ps2 = do {tName <- parseTableName;
@@ -619,50 +619,60 @@ processTreeSimple :: M.Map ColumnAlias ColumnName
 processTreeSimple = SimpleRQT
 
 
+data ProcessError = PE String deriving (Eq, Show, Ord)
+
+instance PrClj ProcessError where
+  pr (PE s) = "{:error " ++ show s ++"}"
+
 -- parse and move names, aliases, expressions to right layer.
-processTree :: ParsedQueryTree -> ResultQueryTree
-processTree (PQT columnMap tableMap whereClause) =
-  case M.assocs tableMap of
-    [(tAlias, Right tName)] ->
-      if [tAlias] /= nub ( map (\(CQ c _) -> c) $ M.elems columnMap)
-      then error $ "Unexpected table aliases in column map." ++ tAlias
-      else case whereJoin of
-             Nothing -> processTreeSimple cMap tName cnf
-             (Just joinClause) -> parent
-               where
-                 child = SimpleRQT cMap tName cnf
-                 parent  = NestedRQT pc m parentJoin
-                 pc = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
-                 m = M.insert tAlias child M.empty
-                 parentJoin =  joinClause -- maybe rework it?
-      where cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
-            -- Nothing -> no filtering just joining in WHERE clause.
-            (Just cnf) = M.lookup tAlias whereMap -- maybe alias for full table name too.
-    _  -> NestedRQT columnMap ts joinConditions
-      where
-        (Just joinConditions) = whereJoin -- if missing -> no join confition
-
-        ts :: M.Map TableAlias ResultQueryTree
-        ts = M.mapWithKey makeSubTable tableMap
-
-        makeSubTable :: TableAlias -> Either ParsedQueryTree TableName -> ResultQueryTree
-        makeSubTable sTabAlias (Left pqt) =
-          case M.lookup sTabAlias whereMap of
-            Nothing -> processTree pqt
-            (Just cnf) ->
-              case processTree pqt of
-                (NestedRQT as tsm cnf2) ->
-                  NestedRQT as tsm (conjunction cnf2
-                   (mapPosCnfLiterals (mapComp (Read . aliasToQualified )numberToMathExpr) cnf))
-                (SimpleRQT as tsm cnf2) -> SimpleRQT as tsm (conjunction cnf cnf2)
-        makeSubTable sTabAlias (Right subTableName) = SimpleRQT colAliases subTableName cnf
-          where
-            cnf :: PosCNF (CompOrder ColumnName SomeNumber)
-            (Just cnf) = M.lookup sTabAlias whereMap
-
-            colAliases :: M.Map ColumnAlias ColumnName
-            (Just colAliases) = M.lookup sTabAlias subTableColAliases
+processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
+processTree (PQT columnMap tableMap whereClause)
+  -- | ha columnMap table aliasok != tableMap kulcsok -> halal.
+  -- | ha whereMap table aliasok != tablaMap kulcsok -> halal.
+  | [(tAlias, Right tName)] <- M.assocs tableMap,
+    (Just cnf)              <- M.lookup tAlias whereMap -- maybe alias for full table name too.
+  = case whereJoin of
+      Nothing -> Right $ processTreeSimple cMap tName cnf
+      (Just joinClause) -> Right parent
+        where
+          child  = SimpleRQT cMap tName cnf
+          parent = NestedRQT pc m parentJoin
+          pc     = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
+          m      = M.insert tAlias child M.empty
+          parentJoin =  joinClause -- maybe rework it?
+  | [(tAlias, Right tName)] <- M.assocs tableMap,
+    Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
+  = Left $ PE $ "No WHERE conditions for table name: " ++ tName
+  | Nothing <- whereJoin
+  = Left $ PE "Missing JOIN conditions!"
+  | (Left b) <- subTables
+  = Left b   -- when error while crating subtable.
+  | (Right tts)           <- subTables,
+    (Just joinConditions) <- whereJoin
+  =  Right $ NestedRQT columnMap tts joinConditions
+  | otherwise = Left $ PE "Unexpected case"
   where
+    subTables = M.traverseWithKey makeSubTable tableMap
+    makeSubTable :: TableAlias -> Either ParsedQueryTree TableName
+                 -> Either ProcessError ResultQueryTree
+    makeSubTable sTabAlias (Left pqt) =
+      case M.lookup sTabAlias whereMap of
+        Nothing -> processTree pqt
+        (Just cnf) ->
+          case processTree pqt of
+            (Right (NestedRQT as tsm cnf2)) ->
+              Right $ NestedRQT as tsm (conjunction cnf2
+                   (mapPosCnfLiterals
+                     (mapComp (Read . aliasToQualified) numberToMathExpr) cnf))
+            (Right (SimpleRQT as tsm cnf2)) ->
+              Right $ SimpleRQT as tsm (conjunction cnf cnf2)
+            (Left a) -> Left a
+    makeSubTable sTabAlias (Right subTableName)
+      |        (Just cnf) <- M.lookup sTabAlias whereMap,
+        (Just colAliases) <- M.lookup sTabAlias subTableColAliases
+      = Right $ SimpleRQT colAliases subTableName cnf
+      | otherwise = Left $ PE "SELECT or WHERE clause is missing."
+    cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
 
     aliasToQualified ::ColumnAlias -> ColumnQualified
     aliasToQualified x = cq
@@ -672,20 +682,15 @@ processTree (PQT columnMap tableMap whereClause) =
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
                            M.empty columnMap
 
-
-doParse :: String -> ResultQueryTree
-doParse s = case tryParser s parseQuery of
-  (Left a) -> error $ show a
-  (Right tree) -> processTree tree
-
-
 -- TODO: Date support.
 
 handleLine :: String -> IO ()
 handleLine line =
   case runParser parseQuery () "" line of
     (Left _) ->  putStrLn ":error"--putStrLn $ pr a
-    (Right b) -> putStrLn $ pr $ processTree b
+    (Right b) -> case processTree b of
+                   (Left err) -> putStrLn $ pr err
+                   (Right tree) -> putStrLn $ pr tree
 
 main :: IO ()
 main = do
