@@ -669,8 +669,6 @@ instance PrClj ProcessError where
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
 processTree (PQT columnMap tableMap whereClause)
-  -- | ha columnMap table aliasok != tableMap kulcsok -> halal.
-  -- | ha whereMap table aliasok != tablaMap kulcsok -> halal.
 
   -- and unknown table alias is used in a WHERE condition
   | (Just t) <- msum $ fmap (\(CQ t _) ->
@@ -679,9 +677,9 @@ processTree (PQT columnMap tableMap whereClause)
   = Left $ PE $ "Unexpected table name in WHERE clause: " ++ t
 
   -- an unknown table alias is used in SELECT clause
-  | (Just t) <-  msum (fmap (\(CQ t _) ->
-                               if not $ M.member t tableMap
-                               then Just t else Nothing) (M.elems columnMap))
+  | (Just t) <-  msum $ fmap (\(CQ t _) ->
+                                if not $ M.member t tableMap
+                                then Just t else Nothing) (M.elems columnMap)
     = Left $ PE $ "Unecpected table name in SELECT clause: " ++ t
 
   --- => SELECT ... FROM tname WHERE ...
@@ -703,8 +701,10 @@ processTree (PQT columnMap tableMap whereClause)
     (Just _)           <- M.lookup tAlias whereMap
   = case whereJoin of
       -- outer table has only left-aligned filters -> can be moven inwards.
+      -- TODO: implement this
       Nothing -> Left $ PE "No JOIN on outer table.."
       -- outer table has mixed filters.
+      -- TODO: implement this.
       (Just _) -> Left $ PE "not implemented: outer table has mixed filters"
  {-       case processTree subTable of
           (Left pe) -> Left pe;
@@ -761,6 +761,7 @@ processTree (PQT columnMap tableMap whereClause)
 -- TODO: Date support.
 -- TODO: JOIN ON support.
 -- TODO: equivalence classes on conditions.
+-- TODO: test nested selects.
 
 handleLine :: String -> IO ()
 handleLine line =
