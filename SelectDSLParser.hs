@@ -8,7 +8,10 @@
 
 module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
              ColumnQualified(..), CompOrder(..), PrClj(..),
-             parseColumnEitherQualified, tryParser, handleLine, main) where
+             parseColumnEitherQualified, tryParser, handleLine, main,
+             mergeFromClauses, parseJoin) where
+
+import Data.Char(toUpper)
 
 import qualified Data.Set as S
   (Set, union, empty, insert, elems, fromList,map, null)
@@ -25,7 +28,7 @@ import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (mempty, mappend)
 
 import Text.Parsec as TP
-  (chainl1, (<|>), string,runParser, ParseError, spaces, try)
+  (chainl1, (<|>), string,runParser, ParseError, spaces, try, sepBy1, satisfy, (<?>))
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
@@ -296,33 +299,35 @@ instance PrClj SomeNumber where
   pr (Right x) = show x
 
 
-parseFromClause :: Parser ParsedFromClause
-parseFromClause = M.fromList <$> commaSep1 haskell ps
-  where
-    ps :: Parser (TableAlias, Either ParsedQueryTree TableName)
-    ps = try ps2 <|> ps1 <|> ps3
-    ps1 = do {x <- parseTableName;
-              return (x, Right x)}
-    ps2 = do {(tAlias, tName) <- parseAsPair parseTableName parseTableAlias;
-              return (tAlias, Right tName)}
-    ps3 = do {(tAlias, tQuery) <- parseAsPair parseQuery parseTableAlias;
-               return (tAlias, Left tQuery)}
+parseFromClause1 :: Parser (TableAlias, Either ParsedQueryTree TableName)
+parseFromClause1 = try ps2 <|> ps1 <|> ps3 where
+  ps1 = do {x <- parseTableName;
+             return (x, Right x)}
+  ps2 = do {(tAlias, tName) <- parseAsPair parseTableName parseTableAlias;
+             return (tAlias, Right tName)}
+  ps3 = do {(tAlias, tQuery) <- parseAsPair parseQuery parseTableAlias;
+             return (tAlias, Left tQuery)}
 
+parseFromClause :: Parser ParsedFromClause
+parseFromClause = M.fromList <$> commaSep1 haskell parseFromClause1
 
 parseColumnAlias :: Parser ColumnAlias
 parseColumnAlias = identifier haskell
 
-
 parseColumnName :: Parser ColumnName
 parseColumnName = identifier haskell
-
 
 parseTableAlias :: Parser TableAlias
 parseTableAlias = identifier haskell
 
-
 parseTableName :: Parser TableName
 parseTableName = identifier haskell
+
+
+-- case insensitive string matching
+stringI :: String -> Parser String
+stringI cs = mapM caseChar cs <?> cs where
+  caseChar c = satisfy (\x -> toUpper x == toUpper c)
 
 
 parseColumnEitherQualified :: Parser ColumnEitherQualified
@@ -391,11 +396,11 @@ instance Foldable LogicTree where
 parseLogicTree :: Parser a -> Parser (LogicTree a)
 parseLogicTree pa = _start
   where
-    ss s p = do{spaces; _<-string s; spaces; return p}
+    ss s p = do{spaces; _<-stringI s; spaces; return p}
     _start = _or
     _or  = chainl1 _and (ss "or" Or)
     _and = chainl1 _ll   (ss "and" And)
-    _not = do {_<-string "not"; spaces; x<-_ll; return $ Not x}
+    _not = do {_<-stringI "not"; spaces; x<-_ll; return $ Not x}
     _pp  = do {spaces; x <- pa; return $ Leaf x}
     _ll  = parens haskell _start <|> _not <|> _pp
 
@@ -410,15 +415,15 @@ parseQuery = try parseSimpleQuery <|> parseAliasedQuery
 parseAliasedQuery :: Parser ParsedQueryTree
 parseAliasedQuery =
   do
-    _<-string "SELECT";
+    _<-stringI "SELECT";
     spaces;
     selectClause <- parseSelectClause
     spaces;
-    _<-string "FROM";
+    _<-stringI "FROM";
     spaces;
     fromClause <- parseFromClause
     spaces;
-    _<-string "WHERE";
+    _<-stringI "WHERE";
     spaces;
     whereClause <- parseWhereClause
     return (PQT selectClause fromClause whereClause)
@@ -432,7 +437,7 @@ parseAsPair pa pb =
   do
     a <- pa
     spaces;
-    _ <- try (string "AS") <|> string "As" <|> string "as"
+    _ <- stringI "AS"
     spaces;
     b <- pb
     return (b, a)
@@ -441,15 +446,15 @@ parseAsPair pa pb =
 parseSimpleQuery :: Parser ParsedQueryTree
 parseSimpleQuery =
   do
-    _ <- string "SELECT"
+    _ <- stringI "SELECT"
     spaces;
     selectClause <- parseSelect
     spaces;
-    _ <- string "FROM"
+    _ <- stringI "FROM"
     spaces;
     fromTable <- parseFrom;
     spaces;
-    _ <- string "WHERE"
+    _ <- stringI "WHERE"
     spaces;
     whereClause <- parseLogicTree $ parseComp $ parseMathExpr parseColumnName;
     let tableName = getTableName fromTable in
@@ -492,22 +497,22 @@ oneset :: (Ord a) => a -> S.Set a
 oneset x = S.insert x S.empty
 
 
-to_cnf :: (Ord a) => LogicTree a -> CNF a
-to_cnf (And x y) = Clauses (S.union xs ys)
+toCnf :: (Ord a) => LogicTree a -> CNF a
+toCnf (And x y) = Clauses (S.union xs ys)
   where
-    Clauses xs = to_cnf x
-    Clauses ys = to_cnf y
-to_cnf (Not (And x y)) = to_cnf (Or (Not x) (Not y))
-to_cnf (Not (Or x y))  = to_cnf (And (Not x) (Not y))
-to_cnf (Or x y) = Clauses $ S.fromList $ map f ps
+    Clauses xs = toCnf x
+    Clauses ys = toCnf y
+toCnf (Not (And x y)) = toCnf (Or (Not x) (Not y))
+toCnf (Not (Or x y))  = toCnf (And (Not x) (Not y))
+toCnf (Or x y) = Clauses $ S.fromList $ map f ps
   where
     f (PosNeg ee ff, PosNeg gg hh) = PosNeg (S.union ee gg) (S.union ff hh)
     ps = [(p,q) | p <- S.elems xs, q <- S.elems ys]
-    Clauses xs = to_cnf x
-    Clauses ys = to_cnf y
-to_cnf (Not (Not e)) = to_cnf e
-to_cnf (Not (Leaf x)) = Clauses $ oneset (PosNeg S.empty (S.insert x S.empty))
-to_cnf (Leaf x) = Clauses $ oneset (PosNeg (oneset x) S.empty)
+    Clauses xs = toCnf x
+    Clauses ys = toCnf y
+toCnf (Not (Not e)) = toCnf e
+toCnf (Not (Leaf x)) = Clauses $ oneset (PosNeg S.empty (S.insert x S.empty))
+toCnf (Leaf x) = Clauses $ oneset (PosNeg (oneset x) S.empty)
 
 
 -- disjunction of positive literals
@@ -535,14 +540,6 @@ mapPosCnfLiterals f (PosClauses cs) =
   PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
 
 
-compToCompOrder :: Comp a -> b -> c -> CompOrder b c
-compToCompOrder (CST _ _) = CST
-compToCompOrder (CLT _ _) = CLT
-compToCompOrder (CEQ _ _) = CEQ
-compToCompOrder (CNEQ _ _) = CNEQ
-compToCompOrder (CSEQ _ _) = CSEQ
-compToCompOrder (CLEQ _ _) = CLEQ
-
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 
   -- try to produce left aligned conditions.
@@ -559,6 +556,14 @@ maybeLeftAlign t = f a b
       Nothing ->  Nothing
     f _  _ = Nothing
     (a, b) = getCompSides t
+
+    compToCompOrder :: Comp a -> b -> c -> CompOrder b c
+    compToCompOrder (CST _ _) = CST
+    compToCompOrder (CLT _ _) = CLT
+    compToCompOrder (CEQ _ _) = CEQ
+    compToCompOrder (CNEQ _ _) = CNEQ
+    compToCompOrder (CSEQ _ _) = CSEQ
+    compToCompOrder (CLEQ _ _) = CLEQ
 
 
 --maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
@@ -631,7 +636,7 @@ prepareWhereClause :: LogicTree ParsedComp
                        M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber)))
 prepareWhereClause tree = rrr
   where
-    (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ to_cnf tree
+    (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ toCnf tree
     --convertBack :: PosCNF (CompOrder ColumnQualified SomeNumber) -> PosCNF ParsedComp
     convertBack = mapPosCnfLiterals (mapComp Read someNumberMathExpr)
     rrr = case orderCnfMaybe of
@@ -755,7 +760,7 @@ processTree (PQT columnMap tableMap whereClause)
 
 -- TODO: Date support.
 -- TODO: JOIN ON support.
--- TODO: equivalence classes on conditions.
+-- TODO: equivalence classes on conditions and spreading conditions to subq
 -- TODO: test nested selects.
 
 handleLine :: String -> IO ()
@@ -772,3 +777,48 @@ main = do
   forM_ (lines c) handleLine
 
 -- END
+
+mergeFromClauses :: ParsedFromClause -> ParsedFromClause -> ParsedFromClause
+mergeFromClauses = undefined
+
+
+parseJoin :: Parser (ParsedFromClause, ParsedWhereClause)
+parseJoin = do
+  xs <- sepBy1 parseJoin1 spaces
+  return (M.fromList $ map fst xs, foldl1 And $ map snd xs)
+
+-- JOIN tableNameOrTable [AS tableAlias] ON conditions
+parseJoin1 :: Parser ((TableAlias, Either ParsedQueryTree TableName), ParsedWhereClause)
+parseJoin1 = do
+  _ <- stringI "JOIN";
+  spaces;
+  (tAlias,t) <- parseFromClause1;
+  spaces;
+  _<- stringI "ON";
+  spaces;
+  onClause <- parseWhereClause;
+  return ((tAlias, t), onClause)
+
+
+{-
+-- simplification of rules (unnecessary.)--------------
+data SimplifyResult a = Contradiction | KeepBoth | ReplaceBothBy (CompOrder a SomeNumber)
+maybeSimplify :: (Eq a) => CompOrder a SomeNumber -> CompOrder a SomeNumber
+  -> SimplifyResult a
+maybeSimplify x y | (a, _) <- getCompSides x, (b, _) <- getCompSides y, b/=a
+  =   error "two arguments do not match!!"
+maybeSimplify aa@(CEQ _ a) (CEQ _ b) = if a /= b then Contradiction else ReplaceBothBy aa
+--maybeSimplify _ (CEQ _ _) = Contradiction
+maybeSimplify (CLT a x) (CLT _ y)   = ReplaceBothBy $ CLT a $ min x y
+maybeSimplify (CLEQ a x) (CLEQ _ y) = ReplaceBothBy $ CLEQ a $ min x y
+-- ellenorizni!!!
+--maybeSimplify aa@(CLEQ _ x) bb@(CLT _ y) = if x < y then Just aa else Just bb
+--maybeSimplify aa@(CLT _ y) bb@(CLEQ _ x) = if x < y then Just aa else Just bb
+-- es ez az egyenlosegvizsgalattal is osszevetheto akar!!
+maybeSimplify _ _ = KeepBoth
+------------------------------------------------------
+-}
+-- == types required
+-- integer, double
+-- string, date
+--

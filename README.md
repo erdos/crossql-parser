@@ -1,6 +1,6 @@
 ## Select DSL Parser
 
-__An SQL query rewrite engine__
+_An SQL query rewrite engine_
 
 
 ### Requirements
