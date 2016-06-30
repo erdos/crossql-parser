@@ -102,8 +102,8 @@ instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CNEQ a b) = "(!= " ++ pr a ++ " " ++ pr b ++")"
   pr (CLEQ a b) = "(>= " ++ pr a ++ " " ++ pr b ++")"
   pr (CSEQ a b) = "(<= " ++ pr a ++ " " ++ pr b ++")"
-  pr (CLT a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
-  pr (CST a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
+  pr (CLT a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
+  pr (CST a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
 
 
 instance (PrClj a) => PrClj (PosCNF a) where
@@ -217,8 +217,9 @@ parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
   where
     op :: Parser (a -> a -> Comp a)
     x p q = string p >> return q
-    op =  try (x "<=" CSEQ)  -- we need try to enforce backtracking
-      <|> try (x ">=" CLEQ)  -- because some patterns share same prefix
+    op =  try (x "<=" CSEQ)  -- try to enforce backtracking bc shared brefix
+      <|> try (x ">=" CLEQ)
+      <|> try (x "<>" CNEQ)  --  -> this is old syntax for negation.
       <|> x "<" CST
       <|> x ">" CLT
       <|> x "==" CEQ
@@ -236,9 +237,9 @@ elemsCompOrder (CLEQ x y) = (x,y)
 
 flipComp :: CompOrder a b -> CompOrder b a
 flipComp x = case x of
-  (CST a b) -> CLT b a
-  (CLT a b) -> CST b a
-  (CEQ a b) -> CEQ b a
+  (CST a b)  -> CLT  b a
+  (CLT a b)  -> CST  b a
+  (CEQ a b)  -> CEQ  b a
   (CNEQ a b) -> CNEQ b a
   (CSEQ a b) -> CLEQ b a
   (CLEQ a b) -> CSEQ b a
