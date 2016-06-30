@@ -759,10 +759,6 @@ processTree (PQT columnMap tableMap whereClause)
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
                            M.empty columnMap
 
--- TODO: Date support.
--- TODO: JOIN ON support.
--- TODO: equivalence classes on conditions and spreading conditions to subq
--- TODO: test nested selects.
 
 handleLine :: String -> IO ()
 handleLine line =
@@ -819,7 +815,9 @@ maybeSimplify (CLEQ a x) (CLEQ _ y) = ReplaceBothBy $ CLEQ a $ min x y
 maybeSimplify _ _ = KeepBoth
 ------------------------------------------------------
 -}
--- == types required
--- integer, double
--- string, date
---
+-- == types required: integer, double, string, date
+
+-- TODO: Date support.
+-- TODO: JOIN ON support.
+-- TODO: equivalence classes on conditions and spreading conditions to subq
+-- TODO: test nested selects.
