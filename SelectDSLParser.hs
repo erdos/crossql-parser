@@ -815,6 +815,7 @@ maybeSimplify (CLEQ a x) (CLEQ _ y) = ReplaceBothBy $ CLEQ a $ min x y
 maybeSimplify _ _ = KeepBoth
 ------------------------------------------------------
 -}
+
 -- == types required: integer, double, string, date
 
 -- TODO: Date support.
