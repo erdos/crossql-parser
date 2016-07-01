@@ -6,10 +6,10 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
-             ColumnQualified(..), CompOrder(..), PrClj(..), SomeScalar,
+module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..),
+             CompOrder(..), PrClj(..), SomeScalar,
              parseColumnEitherQualified, tryParser, handleLine, main, scalarToMathExpr, maybeEvalScalar,
-             mergeFromClauses, parseJoin) where
+             parseStringLiteral, mergeFromClauses, parseJoin) where
 
 import Data.Char(toUpper)
 
@@ -28,14 +28,12 @@ import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (mempty, mappend)
 
 import Text.Parsec as TP
-  (chainl1, (<|>), string,runParser, ParseError, spaces, try, sepBy1, satisfy, (<?>))
+  (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy)
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
-
-data Column = ColName deriving (Eq, Show, Ord)
 
 type SomeNumber = Either Integer Double
 
@@ -212,12 +210,10 @@ parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
   where
     op :: Parser (a -> a -> Comp a)
     x p q = string p >> return q
-    op =  try (x "<=" CSEQ)  -- try to enforce backtracking bc shared brefix
-      <|> try (x ">=" CLEQ)
-      <|> try (x "<>" CNEQ)  --  -> this is old syntax for negation.
-      <|> x "<" CST
-      <|> x ">" CLT
-      <|> x "==" CEQ
+    op =  try (x "<>" CNEQ)
+      <|> try (x "<=" CSEQ) <|> x "<" CST
+      <|> try (x ">=" CLEQ) <|> x ">" CLT
+      <|> try (x "==" CEQ)  <|> x "=" CEQ
       <|> x "!=" CNEQ
 
 
@@ -757,8 +753,7 @@ processTree (PQT columnMap tableMap whereClause)
     cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
 
     aliasToQualified ::ColumnAlias -> ColumnQualified
-    aliasToQualified x = cq
-      where (Just cq) = M.lookup x columnMap
+    aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
 
     cnfColNameToAlias :: PosCNF (CompOrder ColumnName SomeNumber) -> PosCNF (CompOrder ColumnAlias SomeNumber)
     cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
@@ -805,6 +800,8 @@ parseJoin1 = do
   onClause <- parseWhereClause;
   return ((tAlias, t), onClause)
 
+parseStringLiteral :: Parser String
+parseStringLiteral = stringLiteral haskell
 
 {-
 -- simplification of rules (unnecessary.)--------------
@@ -831,3 +828,6 @@ maybeSimplify _ _ = KeepBoth
 -- TODO: JOIN ON support.
 -- TODO: equivalence classes on conditions and spreading conditions to subq
 -- TODO: test nested selects.
+
+
+-- TODO: See http://dev.mysql.com/doc/refman/5.7/en/expressions.html
