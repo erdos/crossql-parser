@@ -9,7 +9,7 @@
 module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..),
              CompOrder(..), PrClj(..), SomeScalar,
              parseColumnEitherQualified, tryParser, handleLine, main, scalarToMathExpr, maybeEvalScalar,
-             parseStringLiteral, mergeFromClauses, parseJoin) where
+             mergeFromClauses, parseJoin) where
 
 import Data.Char(toUpper)
 
@@ -35,7 +35,7 @@ import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
-type SomeNumber = Either Integer Double
+-- type SomeNumber = Either Integer Double
 
 data SomeScalar = DD Double | II Integer | SS String deriving (Eq, Show, Ord)
 
@@ -57,9 +57,9 @@ instance Foldable MathExpr where
   foldMap f (Div a b) = foldMap f a `mappend` foldMap f b
 
 
-numberToMathExpr :: SomeNumber -> MathExpr a
-numberToMathExpr (Left i) = I i
-numberToMathExpr (Right d) = D d
+-- numberToMathExpr :: SomeNumber -> MathExpr a
+-- numberToMathExpr (Left i) = I i
+-- numberToMathExpr (Right d) = D d
 
 scalarToMathExpr :: SomeScalar -> MathExpr a
 scalarToMathExpr (DD d) = D d
@@ -111,21 +111,25 @@ instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
     ++ "}"
 
 
-someNumberMathExpr :: SomeNumber -> MathExpr a
-someNumberMathExpr (Left i) = I i
-someNumberMathExpr (Right d) = D d
+-- someNumberMathExpr :: SomeNumber -> MathExpr a
+-- someNumberMathExpr (Left i) = I i
+-- someNumberMathExpr (Right d) = D d
 
+someScalarMathExpr :: SomeScalar -> MathExpr a
+someScalarMathExpr (II i) = I i
+someScalarMathExpr (DD d) = D d
+someScalarMathExpr (SS s) = S s
 
+-- TODO: eval simple expressions.
 maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
 maybeEvalScalar (D d) = Just $ DD d
 maybeEvalScalar (I i) = Just $ II i
 maybeEvalScalar (S s) = Just $ SS s
 maybeEvalScalar (Read _) = Nothing
-maybeEvalScalar _ = undefined
+maybeEvalScalar _ = Nothing
 
 
-
-
+{-
 maybeEvalMath :: MathExpr t -> Maybe SomeNumber
 maybeEvalMath (D d) = Just $ Right d
 maybeEvalMath (I i) = Just $ Left i
@@ -159,7 +163,7 @@ maybeEvalMath (Div a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
     op (Left i) (Right d) = Right $ fromIntegral i / d
     op (Right d) (Left i) = Right $ d / fromIntegral i
     op (Right d) (Right dr) = Right $ d / dr
-
+-}
 -- COMPARISON OPERATOR
 
 data CompOrder a b = CST a b
@@ -275,7 +279,7 @@ data ResultQueryTree = NestedRQT
                      |  SimpleRQT
                         (M.Map ColumnAlias ColumnName)
                         TableName
-                        (PosCNF (CompOrder ColumnName SomeNumber))
+                        (PosCNF (CompOrder ColumnName SomeScalar))
                      deriving (Eq, Show)
 
 instance PrClj ColumnAlias where
@@ -294,10 +298,10 @@ instance PrClj ResultQueryTree where
   pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
   pr (SimpleRQT a b c) = "{:select " ++ pr a ++ " :from " ++  pr b ++ " :where " ++ pr c ++ "}"
 
-instance PrClj SomeNumber where
-  pr (Left x) = show x
-  pr (Right x) = show x
-
+instance PrClj SomeScalar where
+  pr (II x) = show x
+  pr (DD x) = show x
+  pr (SS x) = show x
 
 parseFromClause1 :: Parser (TableAlias, Either ParsedQueryTree TableName)
 parseFromClause1 = try ps2 <|> ps1 <|> ps3 where
@@ -370,13 +374,15 @@ parseMathExpr f = _start
     _start = _sum
     -- TODO: add support for negative sign!
     -- TODO: add function calls!
-    _number = do {spaces; x <- naturalOrFloat haskell; spaces;
-                  let y = (case x of (Left i) -> I i; (Right d) -> D d)
-                  in return y}
-    _col    = do {spaces; d <- f; spaces; return $ Read d}
+    _number = do {x <- naturalOrFloat haskell;
+                  return (case x of (Left i) -> I i;
+                                    (Right d) -> D d)}
+    _string = S <$> stringLiteral haskell
+    _col    = Read <$> f
     _sum    = chainl1 _prod (ss "+" Add <|> ss "-" Sub)
     _prod   = chainl1 _ll   (ss "*" Mul <|> ss "/" Div)
-    _ll     = parens haskell _sum <|> _col <|>_number
+    _atom   = parens haskell _sum <|> _col <|> _number<|>_string
+    _ll     = do{spaces; x <- _atom; spaces; return x} --parens haskell _sum <|> _col <|>_number <|> _string
 
 
 data LogicTree a = And (LogicTree a) (LogicTree a)
@@ -544,16 +550,18 @@ mapPosCnfLiterals f (PosClauses cs) =
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 
   -- try to produce left aligned conditions.
-maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeNumber)
+maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeScalar)
 maybeLeftAlign t = f a b
   where
-    f (Read c) x = case maybeEvalMath x of
-      Just (Left d)  -> Just $ compToCompOrder t c $ Left d
-      Just (Right i) -> Just $ compToCompOrder t c $ Right i
+    f (Read c) x = case maybeEvalScalar x of
+      Just (DD d)  -> Just $ compToCompOrder t c $ DD d
+      Just (II i) -> Just $ compToCompOrder t c $ II i
+      Just (SS s) -> Just $ compToCompOrder t c $ SS s
       Nothing ->  Nothing
-    f x (Read c) = case maybeEvalMath x of
-      Just (Left d)  -> Just $ compToCompOrder (flipComp t) c $ Left d
-      Just (Right i) -> Just $ compToCompOrder (flipComp t) c $ Right i
+    f x (Read c) = case maybeEvalScalar x of
+      Just (DD d)  -> Just $ compToCompOrder (flipComp t) c $ DD d
+      Just (II i) -> Just $ compToCompOrder (flipComp t) c $ II i
+      Just (SS s) -> Just $ compToCompOrder (flipComp t) c $ SS s
       Nothing ->  Nothing
     f _  _ = Nothing
     (a, b) = getCompSides t
@@ -587,13 +595,13 @@ maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Not
 
 -- given cnf -> collects clauses with same table alias on left side. (and rest clauses)
 splitPosCnfCompOrder ::
-  PosCNF (CompOrder ColumnQualified SomeNumber)
-  -> (Maybe (PosCNF (CompOrder ColumnQualified SomeNumber)),
-      M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber)))
+  PosCNF (CompOrder ColumnQualified SomeScalar)
+  -> (Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)),
+      M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar)))
 splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
   where
     common = liftM (PosClauses . S.fromList) (M.lookup Nothing m)
-    spec :: M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber))
+    spec :: M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar))
     spec =  M.foldlWithKey (\mm k v ->
                               (case k of  -- v is a list
                                  Just a -> M.insert a (mapPosCnfLiterals
@@ -601,11 +609,11 @@ splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
                                                        (PosClauses (S.fromList v))) mm
                                  Nothing -> mm)) M.empty m
 
-    m :: M.Map (Maybe TableAlias) [PosClause (CompOrder ColumnQualified SomeNumber)]
+    m :: M.Map (Maybe TableAlias) [PosClause (CompOrder ColumnQualified SomeScalar)]
     m = groupMapBy maybeHomogenClause (S.elems pcnf)
 
     -- RETURN TableAlias when all literal share the same.
-    maybeHomogenClause :: PosClause (CompOrder ColumnQualified SomeNumber) -> Maybe TableAlias
+    maybeHomogenClause :: PosClause (CompOrder ColumnQualified SomeScalar) -> Maybe TableAlias
     maybeHomogenClause (PosC clauseSet) =
       maybeAllMapToSame ((\(CQ c _) -> c) . fst . elemsCompOrder) (S.elems clauseSet)
 
@@ -616,11 +624,11 @@ type ParsedComp = Comp (MathExpr ColumnQualified)
 -- orders as much conditions as possible.
 prepareWhereClauseFlatten
   :: PosCNF ParsedComp
-        -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeNumber)))
+        -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)))
 prepareWhereClauseFlatten (PosClauses clauses) = (build bb, build aa)
   where
     --- Comp to CompOrder -> MaybeLeftAlign
-    doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeNumber))
+    doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeScalar))
     doClause (PosC clause) = liftM (PosC . S.fromList) $ mapM maybeLeftAlign $ S.elems clause
     build set = if S.null set then Nothing else Just $ PosClauses set
     (aa,bb) = foldl (\(a,b) x ->
@@ -634,12 +642,12 @@ prepareWhereClauseFlatten (PosClauses clauses) = (build bb, build aa)
 -- second value: left aligned cnf in map by table alias name.
 prepareWhereClause :: LogicTree ParsedComp
                    -> (Maybe (PosCNF ParsedComp),
-                       M.Map TableAlias (PosCNF (CompOrder ColumnName SomeNumber)))
+                       M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar)))
 prepareWhereClause tree = rrr
   where
     (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ toCnf tree
     --convertBack :: PosCNF (CompOrder ColumnQualified SomeNumber) -> PosCNF ParsedComp
-    convertBack = mapPosCnfLiterals (mapComp Read someNumberMathExpr)
+    convertBack = mapPosCnfLiterals (mapComp Read someScalarMathExpr)
     rrr = case orderCnfMaybe of
       Nothing -> (mixCnfMaybe, M.empty)
       Just lefts -> case splitPosCnfCompOrder lefts of
@@ -656,7 +664,7 @@ mapAssoc2 k1 k2 v m = case M.lookup k1 m of
 
 
 processTreeSimple :: M.Map ColumnAlias ColumnName
-  -> TableName -> PosCNF (CompOrder ColumnName SomeNumber)  -> ResultQueryTree
+  -> TableName -> PosCNF (CompOrder ColumnName SomeScalar)  -> ResultQueryTree
 processTreeSimple = SimpleRQT
 
 
@@ -741,7 +749,7 @@ processTree (PQT columnMap tableMap whereClause)
             (Right (NestedRQT as tsm cnf2)) ->
               Right $ NestedRQT as tsm (conjunction cnf2
                    (mapPosCnfLiterals
-                     (mapComp (Read . aliasToQualified) numberToMathExpr) (cnfColNameToAlias cnf)))
+                     (mapComp (Read . aliasToQualified) scalarToMathExpr) (cnfColNameToAlias cnf)))
             (Right (SimpleRQT as tsm cnf2)) ->
               Right $ SimpleRQT as tsm (conjunction cnf cnf2)
             (Left a) -> Left a
@@ -755,7 +763,7 @@ processTree (PQT columnMap tableMap whereClause)
     aliasToQualified ::ColumnAlias -> ColumnQualified
     aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
 
-    cnfColNameToAlias :: PosCNF (CompOrder ColumnName SomeNumber) -> PosCNF (CompOrder ColumnAlias SomeNumber)
+    cnfColNameToAlias :: PosCNF (CompOrder ColumnName SomeScalar) -> PosCNF (CompOrder ColumnAlias SomeScalar)
     cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
 
 
@@ -799,9 +807,6 @@ parseJoin1 = do
   spaces;
   onClause <- parseWhereClause;
   return ((tAlias, t), onClause)
-
-parseStringLiteral :: Parser String
-parseStringLiteral = stringLiteral haskell
 
 {-
 -- simplification of rules (unnecessary.)--------------
