@@ -7,8 +7,8 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..), Column(..),
-             ColumnQualified(..), CompOrder(..), PrClj(..),
-             parseColumnEitherQualified, tryParser, handleLine, main,
+             ColumnQualified(..), CompOrder(..), PrClj(..), SomeScalar,
+             parseColumnEitherQualified, tryParser, handleLine, main, scalarToMathExpr, maybeEvalScalar,
              mergeFromClauses, parseJoin) where
 
 import Data.Char(toUpper)
@@ -39,30 +39,34 @@ data Column = ColName deriving (Eq, Show, Ord)
 
 type SomeNumber = Either Integer Double
 
-data MathExpr a = D Double | I Integer | Read a
+data SomeScalar = DD Double | II Integer | SS String deriving (Eq, Show, Ord)
+
+data MathExpr a = D Double | I Integer | S String | Read a
                 | Add (MathExpr a) (MathExpr a)
                 | Sub (MathExpr a) (MathExpr a)
                 | Mul (MathExpr a) (MathExpr a)
                 | Div (MathExpr a) (MathExpr a)
-                | Pow (MathExpr a) (MathExpr a)
-                | Log (MathExpr a)
                 deriving (Eq, Show, Ord, Functor)
 
 instance Foldable MathExpr where
   foldMap f (Read x) = f x
   foldMap _ (I _) = mempty
   foldMap _ (D _) = mempty
+  foldMap _ (S _) = mempty
   foldMap f (Add a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Sub a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Mul a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Div a b) = foldMap f a `mappend` foldMap f b
-  foldMap f (Pow a b) = foldMap f a `mappend` foldMap f b
-  foldMap f (Log a) = foldMap f a
 
 
 numberToMathExpr :: SomeNumber -> MathExpr a
 numberToMathExpr (Left i) = I i
 numberToMathExpr (Right d) = D d
+
+scalarToMathExpr :: SomeScalar -> MathExpr a
+scalarToMathExpr (DD d) = D d
+scalarToMathExpr (II i) = I i
+scalarToMathExpr (SS s) = S s
 
 
 class PrClj a where
@@ -77,25 +81,17 @@ instance PrClj ParseError where
 instance (PrClj a) => PrClj (MathExpr a) where
   pr (D d) = show d
   pr (I i) = show i
+  pr (S s) = show s
   pr (Read t) = pr t
   pr (Add a b) = "(+ " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Sub a b) = "(- " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Mul a b) = "(* " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Div a b) = "(/ " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (Pow a b) = "(pow " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (Log a) = "(log " ++ pr a ++ ")"
 
 
 instance PrClj ColumnQualified where
-  pr (CQ a b) = a ++ "/" ++ b
+  pr (CQ (TA a) (CN b)) = a ++ "/" ++ b
 
-{-
-instance (PrClj a) => PrClj (LogicTree a) where
-  pr (And a b) = "(and " ++ pr a ++ " " ++ pr b ++")"
-  pr (Or a b) = "(or " ++ pr a ++ " " ++ pr b ++")"
-  pr (Not a) = "(not " ++ pr a ++")"
-  pr (Leaf a) = pr a
--}
 
 instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CEQ a b) = "(== " ++ pr a ++ " " ++ pr b ++")"
@@ -122,9 +118,20 @@ someNumberMathExpr (Left i) = I i
 someNumberMathExpr (Right d) = D d
 
 
+maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
+maybeEvalScalar (D d) = Just $ DD d
+maybeEvalScalar (I i) = Just $ II i
+maybeEvalScalar (S s) = Just $ SS s
+maybeEvalScalar (Read _) = Nothing
+maybeEvalScalar _ = undefined
+
+
+
+
 maybeEvalMath :: MathExpr t -> Maybe SomeNumber
 maybeEvalMath (D d) = Just $ Right d
 maybeEvalMath (I i) = Just $ Left i
+maybeEvalMath (S _) = Nothing
 maybeEvalMath (Read _) = Nothing
 maybeEvalMath (Add a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
@@ -154,18 +161,6 @@ maybeEvalMath (Div a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
     op (Left i) (Right d) = Right $ fromIntegral i / d
     op (Right d) (Left i) = Right $ d / fromIntegral i
     op (Right d) (Right dr) = Right $ d / dr
-maybeEvalMath (Pow a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
-  where
-    op :: SomeNumber -> SomeNumber -> SomeNumber
-    op (Left i) (Left j) = Left $ i ^ j
-    op (Left i) (Right d) = Right $ fromIntegral i ** d
-    op (Right d) (Left i) = Right $ d ** fromIntegral i
-    op (Right d) (Right dr) = Right $ d ** dr
-maybeEvalMath (Log a) = liftM op (maybeEvalMath a)
-  where
-    op :: SomeNumber -> SomeNumber
-    op (Left i) = Right $ log $ fromIntegral i
-    op (Right d) = Right $ log d
 
 -- COMPARISON OPERATOR
 
@@ -256,14 +251,13 @@ negateComp x = case x of
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
-type ColumnName = String
+newtype ColumnName  = CN String deriving (Show, Eq, Ord)
+newtype ColumnAlias = CA String deriving (Show, Eq, Ord)
+newtype TableName   = TN String deriving (Show, Eq, Ord)
+newtype TableAlias  = TA String deriving (Show, Eq, Ord)
 
-type ColumnAlias = String
+
 data ColumnQualified = CQ TableAlias ColumnName deriving (Show, Eq, Ord)
-
-type TableName = String
-type TableAlias = String
-
 type ColumnEitherQualified = Either ColumnQualified ColumnAlias
 
 type ColumnMap         = M.Map ColumnAlias ColumnQualified
@@ -289,7 +283,16 @@ data ResultQueryTree = NestedRQT
                      deriving (Eq, Show)
 
 instance PrClj ColumnAlias where
-  pr = id
+  pr (CA s) = s
+
+instance PrClj ColumnName where
+  pr (CN s) = s
+
+instance PrClj TableName where
+  pr (TN s) = s
+
+instance PrClj TableAlias where
+  pr (TA s) = s
 
 instance PrClj ResultQueryTree where
   pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
@@ -302,8 +305,8 @@ instance PrClj SomeNumber where
 
 parseFromClause1 :: Parser (TableAlias, Either ParsedQueryTree TableName)
 parseFromClause1 = try ps2 <|> ps1 <|> ps3 where
-  ps1 = do {x <- parseTableName;
-             return (x, Right x)}
+  ps1 = do {(TN x) <- parseTableName;
+             return (TA x, Right (TN x))}
   ps2 = do {(tAlias, tName) <- parseAsPair parseTableName parseTableAlias;
              return (tAlias, Right tName)}
   ps3 = do {(tAlias, tQuery) <- parseAsPair parseQuery parseTableAlias;
@@ -313,16 +316,16 @@ parseFromClause :: Parser ParsedFromClause
 parseFromClause = M.fromList <$> commaSep1 haskell parseFromClause1
 
 parseColumnAlias :: Parser ColumnAlias
-parseColumnAlias = identifier haskell
+parseColumnAlias = CA <$> identifier haskell
 
 parseColumnName :: Parser ColumnName
-parseColumnName = identifier haskell
+parseColumnName = CN <$> identifier haskell
 
 parseTableAlias :: Parser TableAlias
-parseTableAlias = identifier haskell
+parseTableAlias = TA <$> identifier haskell
 
 parseTableName :: Parser TableName
-parseTableName = identifier haskell
+parseTableName = TN <$> identifier haskell
 
 
 -- case insensitive string matching
@@ -334,16 +337,16 @@ stringI cs = mapM caseChar cs <?> cs where
 parseColumnEitherQualified :: Parser ColumnEitherQualified
 parseColumnEitherQualified = do {
   str <- identifier haskell;
-  option (Right str)
+  option (Right (CA str))
     (do {_<-string ".";
          qq <- identifier haskell;
-         return $ Left $ CQ str qq
+         return $ Left $ CQ (TA str) (CN qq)
         })}
 
 
 parseColumnQualified :: Parser ColumnQualified
 parseColumnQualified = do {
-  tab <- parseTableName;
+  tab <- parseTableAlias;
   _   <- string ".";
   nam <- parseColumnName;
   return $ CQ tab nam
@@ -358,8 +361,8 @@ parseSelectClause = M.fromList <$> commaSep1 haskell part
     part :: Parser (ColumnAlias, ColumnQualified)
     part = try parseWithAlias <|> parseWithoutAlias
     -- no alias is given: alis will be full qualified name with dot.
-    parseWithoutAlias = do {qualified@(CQ table column) <- parseColumnQualified;
-                            return (table ++ "." ++ column, qualified)}
+    parseWithoutAlias = do {qualified@(CQ (TA table) (CN column)) <- parseColumnQualified;
+                            return (CA $ table ++ "." ++ column, qualified)}
     -- alias is given.
     parseWithAlias = parseAsPair parseColumnQualified parseColumnAlias
 
@@ -463,8 +466,9 @@ parseSimpleQuery =
                    (toFromClause fromTable)
                    (toWhereClause tableName whereClause)
   where
-    getTableName (Left _) = "$"
-    getTableName (Right t) = t
+    getTableName :: Either ParsedQueryTree TableName -> TableAlias
+    getTableName (Left _) = TA "$"
+    getTableName (Right (TN tn)) = TA tn
 
     toFromClause :: Either ParsedQueryTree TableName -> ParsedFromClause
     toFromClause x = M.insert (getTableName x) x M.empty
@@ -486,7 +490,7 @@ parseSimpleQuery =
     part :: Parser (ColumnAlias, ColumnName)
     part = try parseWithAlias <|> parseWithoutAlias
 
-    parseWithoutAlias = do {q <- parseColumnName; return (q, q)}
+    parseWithoutAlias = do {(CN cn) <- parseColumnName; return (CA cn, CN cn)}
     parseWithAlias = parseAsPair parseColumnName parseColumnAlias
 
 -- a Clause is a disjunction of positive and negatives items.
@@ -672,16 +676,16 @@ processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
 processTree (PQT columnMap tableMap whereClause)
 
   -- and unknown table alias is used in a WHERE condition
-  | (Just t) <- msum $ fmap (\(CQ t _) ->
+  | (Just (TA tAlias)) <- msum $ fmap (\(CQ t _) ->
                                 if not $ M.member t tableMap
                                 then Just t else Nothing)  (collectCQ whereClause)
-  = Left $ PE $ "Unexpected table name in WHERE clause: " ++ t
+  = Left $ PE $ "Unexpected table name in WHERE clause: " ++ tAlias
 
   -- an unknown table alias is used in SELECT clause
-  | (Just t) <-  msum $ fmap (\(CQ t _) ->
+  | (Just (TA tAlias)) <-  msum $ fmap (\(CQ t _) ->
                                 if not $ M.member t tableMap
                                 then Just t else Nothing) (M.elems columnMap)
-    = Left $ PE $ "Unecpected table name in SELECT clause: " ++ t
+    = Left $ PE $ "Unecpected table name in SELECT clause: " ++ tAlias
 
   --- => SELECT ... FROM tname WHERE ...
   | [(tAlias, Right tName)] <- M.assocs tableMap,
@@ -693,7 +697,8 @@ processTree (PQT columnMap tableMap whereClause)
         where
           child  = SimpleRQT cMap tName cnf
           parent = NestedRQT pc m parentJoin
-          pc     = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
+          pc :: M.Map ColumnAlias ColumnQualified
+          pc     = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
           m      = M.insert tAlias child M.empty
           parentJoin =  joinClause -- maybe rework it?
 
@@ -717,7 +722,7 @@ processTree (PQT columnMap tableMap whereClause)
 -}
 
   --- => SELECT t1, ... FROM ... WHERE
-  | [(tAlias, Right tName)] <- M.assocs tableMap,
+  | [(tAlias, Right (TN tName))] <- M.assocs tableMap,
     Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
   | Nothing <- whereJoin
@@ -740,7 +745,7 @@ processTree (PQT columnMap tableMap whereClause)
             (Right (NestedRQT as tsm cnf2)) ->
               Right $ NestedRQT as tsm (conjunction cnf2
                    (mapPosCnfLiterals
-                     (mapComp (Read . aliasToQualified) numberToMathExpr) cnf))
+                     (mapComp (Read . aliasToQualified) numberToMathExpr) (cnfColNameToAlias cnf)))
             (Right (SimpleRQT as tsm cnf2)) ->
               Right $ SimpleRQT as tsm (conjunction cnf cnf2)
             (Left a) -> Left a
@@ -754,6 +759,10 @@ processTree (PQT columnMap tableMap whereClause)
     aliasToQualified ::ColumnAlias -> ColumnQualified
     aliasToQualified x = cq
       where (Just cq) = M.lookup x columnMap
+
+    cnfColNameToAlias :: PosCNF (CompOrder ColumnName SomeNumber) -> PosCNF (CompOrder ColumnAlias SomeNumber)
+    cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
+
 
     (whereJoin, whereMap) = prepareWhereClause whereClause
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)

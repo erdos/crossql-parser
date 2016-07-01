@@ -8,7 +8,7 @@ _An SQL query rewrite engine_
 | name | package | version | description |
 | ---- | ------- | ------- | ----------- |
 | GHC  | `ghc` | `7.8.5` | Glasgow Haskell Compiler |
-| Parsec | `ghc-parsec-devel`, `ghc-parsec` | `` | parsec library  |
+| Parsec | `ghc-parsec-devel`, `ghc-parsec` | `3.1.5-2` | parsec library  |
 
 
 ### Usage
