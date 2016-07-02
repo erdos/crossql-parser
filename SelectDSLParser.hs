@@ -29,7 +29,6 @@ import Data.Monoid (mempty, mappend)
 import Data.Maybe(listToMaybe, mapMaybe)
 -- import Data.Tuple(swap)
 
-
 import Text.Parsec as TP
   (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy)
 import Text.Parsec.Combinator (option)
@@ -37,6 +36,8 @@ import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
+
+import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
 
 -- type SomeNumber = Either Integer Double
 
@@ -811,13 +812,14 @@ processTree (PQT columnMap tableMap whereClause)
 handleLine :: String -> IO ()
 handleLine line =
   case runParser parseQuery () "" line of
-    (Left pe) ->  putStrLn $ ":error"  ++ (show pe) -- ++ (show pe) --putStrLn $ pr a
+    (Left pe) -> putStrLn $ ":error"  ++ show pe
     (Right b) -> case processTree b of
                    (Left err) -> putStrLn $ pr err
                    (Right tree) -> putStrLn $ pr tree
 
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering;
   c <- getContents;
   forM_ (lines c) handleLine
 
