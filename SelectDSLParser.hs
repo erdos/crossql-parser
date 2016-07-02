@@ -324,7 +324,7 @@ parseFromClause1 = try ps2 <|> ps1 <|> ps3 where
              return (TA x, Right (TN x))}
   ps2 = do {(tAlias, tName) <- parseAsPair parseTableName parseTableAlias;
              return (tAlias, Right tName)}
-  ps3 = do {(tAlias, tQuery) <- parseAsPair parseQuery parseTableAlias;
+  ps3 = do {(tAlias, tQuery) <- parseAsPair (parens haskell parseQuery) parseTableAlias;
              return (tAlias, Left tQuery)}
 
 parseFromClause :: Parser ParsedFromClause
@@ -829,12 +829,14 @@ processTree (PQT columnMap tableMap whereClause)
           case processTree pqt of
             (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause)
               where
-                -- TODO: do I need asSimple?
-                asSimple = M.fromList $ map (\ (CA ca, CQ ta _) -> (CA ca, CQ ta (CN ca))) $ M.assocs as
+
+                asSimple = M.fromList $ map (\ (CA _, CQ ta (CN cn)) -> (CA cn, CQ ta (CN cn))) $ M.assocs as
+                -- todo: map back col aliases in cnf to col names (using `as`)
                 mergedWhereClause = conjunction cnf2
                                       (mapPosCnfLiterals
                                         (mapComp (Read . aliasToQualified)
                                          scalarToMathExpr) (cnfColNameToAlias cnf))
+            -- TODO: map back col aliases in cnf to col names (using `as`)
             (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnf cnf2)
               where
                 -- TODO: do I need asSimple?
@@ -842,6 +844,7 @@ processTree (PQT columnMap tableMap whereClause)
             -- error is propagated
             (Left a) -> Left a
     makeSubTable sTabAlias (Right subTableName)
+    -- TODO: maybe map back names, i am not sure.
       |        (Just cnf) <- M.lookup sTabAlias whereMap,
         (Just colAliases) <- M.lookup sTabAlias subTableColAliases,
             simpleColAliases <- M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs colAliases
