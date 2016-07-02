@@ -429,8 +429,34 @@ parseLogicTree pa = _start
 
 -- tryParser "a and not c or b" (parseLogicTree parseColumnName)
 
+parseWhereClause1 :: forall a. Parser a -> Parser (LogicTree (Comp (MathExpr a)))
+parseWhereClause1 p = unfoldLogicTree <$> parseLogicTree (try parse_between <|> (Leaf <$> pc))
+  where
+    pc :: Parser (Comp (MathExpr a))
+    pc = parseComp $ parseMathExpr p
+
+    parse_between :: Parser (LogicTree (Comp (MathExpr a)))
+    parse_between = do
+      colname <- Read <$> p
+      spaces;
+      _ <- stringI "BETWEEN";
+      spaces;
+      x1 <- parseMathExpr p;
+      spaces;
+      _ <- stringI "AND";
+      spaces;
+      x2 <- parseMathExpr p;
+      return $ And (Leaf (CST x1 colname)) (Leaf (CST colname x2))
+
+unfoldLogicTree :: LogicTree (LogicTree a) -> LogicTree a
+unfoldLogicTree (And a b) = And (unfoldLogicTree a) (unfoldLogicTree b)
+unfoldLogicTree (Or a b) = Or (unfoldLogicTree a) (unfoldLogicTree b)
+unfoldLogicTree (Not a) = Not (unfoldLogicTree a)
+unfoldLogicTree (Leaf x) = x
+
+
 parseWhereClause :: Parser ParsedWhereClause
-parseWhereClause = parseLogicTree $ parseComp $ parseMathExpr parseColumnQualified
+parseWhereClause = parseWhereClause1 parseColumnQualified
 
 parseQuery :: Parser ParsedQueryTree
 parseQuery = try parseSimpleQuery <|> parseAliasedQuery
@@ -479,7 +505,7 @@ parseSimpleQuery =
     spaces;
     _ <- stringI "WHERE"
     spaces;
-    whereClause <- parseLogicTree $ parseComp $ parseMathExpr parseColumnName;
+    whereClause <- parseWhereClause1 parseColumnName;
     let tableName = getTableName fromTable in
       return $ PQT (toSelectClause tableName selectClause)
                    (toFromClause fromTable)
@@ -563,7 +589,7 @@ mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
 mapPosCnfLiterals f (PosClauses cs) =
   PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
 
-cnfAddClause :: (Ord a) => (PosClause a) -> (PosCNF a) -> (PosCNF a)
+cnfAddClause :: (Ord a) => PosClause a -> PosCNF a -> PosCNF a
 cnfAddClause x (PosClauses cs) = PosClauses (S.insert x cs)
 
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
