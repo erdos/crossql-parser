@@ -30,7 +30,7 @@ import Data.Maybe(listToMaybe, mapMaybe)
 -- import Data.Tuple(swap)
 
 import Text.Parsec as TP
-  (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy)
+  (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
 import Text.Parsec.Combinator (option)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
@@ -349,7 +349,19 @@ stringI cs = mapM caseChar cs <?> cs where
   caseChar c = satisfy (\x -> toUpper x == toUpper c)
 
 parseIdentifier :: Parser String
-parseIdentifier = identifier $ makeTokenParser javaStyle
+parseIdentifier = idBacktick <|> id1
+  where
+    idBacktick = do {
+      _ <- char '`';
+      s <- many1 $ noneOf "`" ; -- satisfy (/= '`');
+      _ <- char '`';
+      return s}
+    id1 = do {
+      firstChar <- many1 letter;
+      restChar <- many $ alphaNum <|> oneOf "_:";
+      return $ firstChar ++ restChar}
+
+
 
 parseColumnEitherQualified :: Parser ColumnEitherQualified
 parseColumnEitherQualified = do {
@@ -491,6 +503,8 @@ parseAsPair pa pb =
     b <- pb
     return (b, a)
 
+
+-- parses a query with one tablename/table in it, no aliases
 -- todo: maybe also support subQuery
 parseSimpleQuery :: Parser ParsedQueryTree
 parseSimpleQuery =
@@ -506,17 +520,18 @@ parseSimpleQuery =
     _ <- stringI "WHERE"
     spaces;
     whereClause <- parseWhereClause1 parseColumnName;
-    let tableName = getTableName fromTable in
+    let tableName = getTableAlias fromTable in
       return $ PQT (toSelectClause tableName selectClause)
                    (toFromClause fromTable)
                    (toWhereClause tableName whereClause)
   where
-    getTableName :: Either ParsedQueryTree TableName -> TableAlias
-    getTableName (Left _) = TA "$"
-    getTableName (Right (TN tn)) = TA tn
+    -- alias is either table name or "$" when subquery.
+    getTableAlias :: Either ParsedQueryTree TableName -> TableAlias
+    getTableAlias (Left _) = TA "$"
+    getTableAlias (Right (TN tn)) = TA tn
 
     toFromClause :: Either ParsedQueryTree TableName -> ParsedFromClause
-    toFromClause x = M.insert (getTableName x) x M.empty
+    toFromClause x = M.insert (getTableAlias x) x M.empty
 
     toSelectClause :: TableAlias -> [(ColumnAlias, ColumnName)] -> ColumnMap
     toSelectClause t = foldl (\m (a,c) -> M.insert a (CQ t c) m) M.empty
@@ -886,11 +901,11 @@ spanEquations xs = [(q,p) | s <- S.elems solution, p <- S.elems s, q <- S.elems 
     step :: S.Set (S.Set a) -> S.Set (S.Set a)
     step s = S.fromList $ map findMatching ss
       where ss = S.elems s
-            findMatching s1 = head $ (mapMaybe
-                                      (\s2 -> if s1 /= s2 && (not $ S.null $ S.intersection s1 s2)
-                                              then Just $ S.union s1 s2
-                                              else Nothing)
-                                      ss) ++ [s1]
+            findMatching s1 = head $ mapMaybe
+                              (\s2 -> if s1 /= s2 && not (S.null $ S.intersection s1 s2)
+                                      then Just $ S.union s1 s2
+                                      else Nothing)
+                              ss ++ [s1]
     fixpt x f = if x == fx then x else fixpt fx f where fx = f x
 
 
@@ -915,7 +930,6 @@ expandEquivalences equivs cnf = newCnf
         xs <- S.elems literals,
         leftSides <- map (fst . getCompSides) xs,
         allTheSame leftSides
---        [] <- concatMap (collectReads . snd . getCompSides) xs -- right sides have no column names.
         = listToMaybe leftSides
       | otherwise = Nothing
 
