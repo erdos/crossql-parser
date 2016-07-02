@@ -391,7 +391,8 @@ parseSelectClause = M.fromList <$> commaSep1 haskell part
     part = try parseWithAlias <|> parseWithoutAlias
     -- no alias is given: alis will be full qualified name with dot.
     parseWithoutAlias = do {qualified@(CQ (TA table) (CN column)) <- parseColumnQualified;
-                            return (CA $ table ++ "." ++ column, qualified)}
+                            return (CA $  table ++ "." ++
+                                    column, qualified)}
     -- alias is given.
     parseWithAlias = parseAsPair parseColumnQualified parseColumnAlias
 
@@ -763,9 +764,9 @@ processTree (PQT columnMap tableMap whereClause)
   = Left $ PE $ "Unexpected table name in WHERE clause: " ++ tAlias
 
   -- an unknown table alias is used in SELECT clause
-  | (Just (TA tAlias)) <-  msum $ fmap (\(CQ t _) ->
-                                if not $ M.member t tableMap
-                                then Just t else Nothing) (M.elems columnMap)
+  | (Just (TA tAlias)) <- msum $ fmap (\(CQ t _) ->
+                                         if not $ M.member t tableMap
+                                          then Just t else Nothing) (M.elems columnMap)
     = Left $ PE $ "Unecpected table name in SELECT clause: " ++ tAlias
 
   --- => SELECT ... FROM tname WHERE ...
@@ -801,8 +802,6 @@ processTree (PQT columnMap tableMap whereClause)
               m      = M.insert tAlias child M.empty
               parentJoin =  joinClause -- maybe rework it?
 -}
-
-  --- => SELECT t1, ... FROM ... WHERE
   | [(tAlias, Right (TN tName))] <- M.assocs tableMap,
     Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
@@ -810,30 +809,43 @@ processTree (PQT columnMap tableMap whereClause)
   = Left $ PE "Missing JOIN conditions!"
   | (Left b) <- subTables
   = Left b   -- when error while crating subtable.
+  -- general case:
+  --- => SELECT t1, ... FROM ... WHERE ...
   | (Right tts)           <- subTables,
     (Just joinConditions) <- whereJoin
+    -- here: filter aliases from select and condition and replace them with aliases from subtables.
   =  Right $ NestedRQT columnMap tts joinConditions
   | otherwise = Left $ PE "Unexpected case"
   where
+
     subTables = M.traverseWithKey makeSubTable tableMap
     makeSubTable :: TableAlias -> Either ParsedQueryTree TableName
                  -> Either ProcessError ResultQueryTree
+    -- in submaps, we simplify all alias bindings (because they are void anyways)
     makeSubTable sTabAlias (Left pqt) =
       case M.lookup sTabAlias whereMap of
         Nothing -> processTree pqt
         (Just cnf) ->
           case processTree pqt of
-            (Right (NestedRQT as tsm cnf2)) ->
-              Right $ NestedRQT as tsm (conjunction cnf2
-                   (mapPosCnfLiterals
-                     (mapComp (Read . aliasToQualified) scalarToMathExpr) (cnfColNameToAlias cnf)))
-            (Right (SimpleRQT as tsm cnf2)) ->
-              Right $ SimpleRQT as tsm (conjunction cnf cnf2)
+            (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause)
+              where
+                -- TODO: do I need asSimple?
+                asSimple = M.fromList $ map (\ (CA ca, CQ ta _) -> (CA ca, CQ ta (CN ca))) $ M.assocs as
+                mergedWhereClause = conjunction cnf2
+                                      (mapPosCnfLiterals
+                                        (mapComp (Read . aliasToQualified)
+                                         scalarToMathExpr) (cnfColNameToAlias cnf))
+            (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnf cnf2)
+              where
+                -- TODO: do I need asSimple?
+                asSimple = M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs as
+            -- error is propagated
             (Left a) -> Left a
     makeSubTable sTabAlias (Right subTableName)
       |        (Just cnf) <- M.lookup sTabAlias whereMap,
-        (Just colAliases) <- M.lookup sTabAlias subTableColAliases
-      = Right $ SimpleRQT colAliases subTableName cnf
+        (Just colAliases) <- M.lookup sTabAlias subTableColAliases,
+            simpleColAliases <- M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs colAliases
+      = Right $ SimpleRQT simpleColAliases subTableName cnf
       | otherwise = Left $ PE "SELECT or WHERE clause is missing."
     cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
 
