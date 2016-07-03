@@ -84,21 +84,26 @@
   "SELECT likes FROM fb WHERE id==1"
   {:select {likes likes} :from fb :where (cnf [(== id 1)])})
 
+
 (testing "Simple query with crazy identifiers"
   "SELECT ga:sessions FROM fb123 WHERE $id==1"
   {:select {ga:sessions ga:sessions}, :from fb123, :where (cnf [(== $id 1)])})
+
 
 (testing "Simple query with table alias"
   "SELECT fb.likes FROM tablename AS fb WHERE fb.id==1"
   {:select {fb.likes likes} :from tablename :where (cnf [(== id 1)])})
 
+
 (testing "Simple query with column alias"
   "SELECT likes AS ll FROM fb WHERE id==1"
   {:select {ll likes} :from fb :where (cnf [(== id 1)])})
 
+
 (testing "Simple query with table alias and column alias"
   "SELECT fb.likes AS ll FROM tablename AS fb WHERE fb.id==1"
   {:select {ll likes} :from tablename :where (cnf [(== id 1)])})
+
 
 (testing "Simple query with colname in filtering not in selection"
   ;; keys a and b should be introduced in inner selection.
@@ -109,12 +114,14 @@
            :from facebook, :where (cnf [(== id 1)])}},
    :where (cnf [(== facebook/a facebook/b)])})
 
+
 (testing "Simply JOIN two tables with one column alias"
   "SELECT t1.a AS t1a_alias, t2.b FROM t1, t2 WHERE t1.a==t2.b and t1.x==1 and t2.y==2"
   {:select {t1a_alias t1/a, t2.b t2/b}
    :from {t1 {:select {a a}, :from t1, :where (cnf [(== x 1)])},
           t2 {:select {b b}, :from t2, :where (cnf [(== y 2)])}},
    :where (cnf [(== t1/a t2/b)])})
+
 
 (testing "Simply JOIN two tables on key NOT IN selection of subquery."
   ;; the system should add the missing column name/alias pairs to the subquery select maps.
@@ -123,7 +130,7 @@
    :from {t1 {:select {a a, x x} :from t1 :where (cnf [(== f 1)])}
           t2 {:select {b b, y y} :from t2 :where (cnf [(== g 2)])}}
    :where (cnf [(== t1/x t2/y)])})
-;; (-main)
+
 
 (testing "Single subquery"
   "SELECT t.likes FROM (SELECT xx as x, yy as y FROM webpage where id==1) AS t where t.x==t.y"
@@ -132,6 +139,7 @@
              :from webpage,
              :where (cnf [(== id 1)])}},
    :where (cnf [(== t/x t/y)])})
+
 
 (testing "Single subquery with filter inside"
   ;; aa, bb should be moved to the middle query automatically
@@ -142,12 +150,14 @@
              :where (cnf [(== webpage/aa webpage/bb)])}},
    :where (cnf [(== t/x t/y)])})
 
+
 ;; FEATURE: all kinds of relations
 (testing "Simple query with all kinds of relations"
   "SELECT id FROM t WHERE a==1 and b<=2 and c>=3 and d<4 and e>5 and f!=6 and g<>7 and h BETWEEN 8 and 9"
   {:select {id id}, :from t,
    :where
    (cnf [(< d 4)] [(> e 5)] [(== a 1)] [(>= c 3)] [(>= h 8)] [(<= b 2)] [(<= h 9)] [(!= f 6)] [(!= g 7)])})
+
 
 ;; FEATURE: conditions propagate over equivalences to submaps.
 (testing "Two simple subquery share the same interval"
@@ -168,6 +178,7 @@
    :from table
    :where (cnf [(== seconds 86400)])})
 
+
 (testing "Two subquery as select expressions"
   "Select x.id, y.id From (SELECT id from t where id > 1) As x, (SELECT id from t where id > 10) As y Where x.id==y.id"
   {:select {x.id x/id, y.id y/id},
@@ -183,9 +194,50 @@
           y {:select {yid id}, :from t, :where (cnf [(> id 10)])}},
    :where (cnf [(== x/xid y/yid)])})
 
+
+;; this fails: see column names in x
 (testing "Two subquery - one table name, one subexpr"
   "Select x.xid, y.yid From (SELECT id As xid from t where id > 1) As x, y As y Where x.xid==y.yid and y.yid > 12"
   {:select {x.xid x/xid, y.yid y/yid},
    :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)] [(> id 12)])},
           y {:select {yid yid}, :from y, :where (cnf [(> yid 10)])}},
    :where (cnf [(== x/xid y/yid)])})
+
+
+(testing "One nested select without join expression"
+  "SELECT id FROM (SELECT id FROM t where day>2) WHERE id>5"
+  {:select {id id}
+   :from t
+   :where (cnf [(> day 2)] [(> id 5)])})
+
+
+(testing "One nested select with alias without join expression"
+  "SELECT p.id FROM (SELECT id FROM t where day>2) AS p WHERE p.id>5"
+  {:select {id id}
+   :from t
+   :where (cnf [(> day 2)] [(> id 5)])})
+
+
+(testing "One nested select with outside only join expr"
+  "SELECT id FROM (SELECT id, key FROM t where day>2) WHERE id==key"
+  {:select {id $/id}
+   :from {$ {:select {id id, key key}
+             :from t
+             :where (cnf [(> day 2)])}}
+   :where (cnf [(== $/id $/key)])})
+
+
+(testing "One nested select with outside only join expr"
+  "SELECT p.id FROM (SELECT id, key FROM t where day>2) AS p WHERE p.id==p.key"
+  {:select {p.id p/id}
+   :from {p {:select {id id, key key} :from t :where (cnf [(> day 2)])}}
+   :where (cnf [(== p/id p/key)])})
+
+
+(testing "One nested select with join expression and filter on outside"
+  "SELECT id FROM (SELECT id, key FROM t where day>2) WHERE id>5 and id==key"
+  {:select {id $/id}
+   :from {$ {:select {id id, key key}
+             :from t
+             :where (cnf [(> day 2)] [(> id 5)])}}
+   :where (cnf [(== $/id $/key)])})

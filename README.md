@@ -23,7 +23,7 @@ _An SQL query rewrite engine_
 
 ### Example
 
-```Clojure
+```Clojurex
 <= SELECT t.a FROM t WHERE t.x<12 and t.y>=3
 => {:select {t.a a} :from t :where (cnf [(< x 12)] [(>= y 3)])}
 ```

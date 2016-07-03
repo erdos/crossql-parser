@@ -806,6 +806,8 @@ processTree (PQT columnMap tableMap whereClause)
         columnsForTab :: TableAlias -> [ColumnName]
         columnsForTab ta = mapMaybe (\(CQ t c) -> if t==ta then Just c else Nothing) columnsFromJoinClause
 
+
+        -- XXX here: maybe select renames should be handled somehow
         ff tableAlias (SimpleRQT colMap b c) = SimpleRQT newColMap b c
           where columns = columnsForTab tableAlias
                 newColMap = foldl (\aa (CN x) -> M.insertWith (\_ t -> t) (CA x) (CN x) aa) colMap columns
