@@ -1,4 +1,6 @@
-## Select DSL Parser
+<div align="center"><img src="doc/logo.png" alt="erdos.fun logo"/></div>
+
+<div align="center"><h1>Select DSL Parser</h1></div>
 
 _An SQL query rewrite engine_
 
@@ -28,8 +30,8 @@ _An SQL query rewrite engine_
 
 More examples and expected results can be found in the `test.clj` file. You may need to install `boot` to run the test suite.
 
-### <a href="Input.md">Input format</a>
+### <a href="doc/Input.md">Input format</a>
 
-### <a href="Output.md">Output format</a>
+### <a href="doc/Output.md">Output format</a>
 
 ### License
