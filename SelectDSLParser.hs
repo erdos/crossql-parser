@@ -678,42 +678,34 @@ splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
     maybeHomogenClause (PosC clauseSet) =
       maybeAllMapToSame ((\(CQ c _) -> c) . fst . elemsCompOrder) (S.elems clauseSet)
 
-type ParsedComp = Comp (MathExpr ColumnQualified)
 
+type ParsedComp = Comp (MathExpr ColumnQualified)
 
 
 -- orders as much conditions as possible.
 prepareWhereClauseFlatten
   :: PosCNF ParsedComp
         -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)))
-prepareWhereClauseFlatten tree  = case (build bb, build aa) of
+prepareWhereClauseFlatten (PosClauses clauses) = case (build bb, build aa) of
   -- if we have conditions to both filter and join and we have an equavalence join condition:
   -- then we create conditions that are implications of the equivalence.
   -- for example:
   -- (a.data==b.data and a.data>1) => (a.data==b.data and a.data>1 and b.data>1)
-  (Just joinCnf, Just filterCnf) -> (Just joinCnf, Just cnf2)
-    where
-      (PosClauses joinClauses) = joinCnf
-      eqs :: [(ColumnQualified, ColumnQualified)]
-      eqs = [(l, r) | (PosC clause) <- S.elems joinClauses, 1 == S.size clause, (CEQ (Read l) (Read r)) <- S.elems clause]
-      cnf2 = expandEquivalences eqs filterCnf
-  xy -> xy
+  (Just joinCnf, Just filterCnf) -> (Just joinCnf, Just (make_cnf joinCnf filterCnf))
+  any_other_pair                 -> any_other_pair
   where
-    -- tree = expandEquivalences tree1
-    -- tree = tree
-
-    --eqs = mapMaybe (\x -> Nothing)
-
-    (PosClauses clauses) = tree
+    make_eqs (PosClauses joinClauses) = [(l, r) | (PosC clause) <- S.elems joinClauses,
+                                         1 == S.size clause,
+                                         (CEQ (Read l) (Read r)) <- S.elems clause]
+    make_cnf joinCnf = expandEquivalences (make_eqs joinCnf)
     --- Comp to CompOrder -> MaybeLeftAlign
     doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeScalar))
     doClause (PosC clause) = liftM (PosC . S.fromList) $ mapM maybeLeftAlign $ S.elems clause
     build set = if S.null set then Nothing else Just $ PosClauses set
-    (aa,bb) = foldl (\(a,b) x ->
-                  case doClause x of
-                    Just t  -> (S.insert t a, b);
-                    Nothing -> (a, S.insert x b))
-              (S.empty,S.empty) (S.elems clauses)
+    (aa,bb) = foldl (\(a,b) x -> case doClause x of
+                                   Just t  -> (S.insert t a, b);
+                                   Nothing -> (a, S.insert x b))
+                                                 (S.empty,S.empty) (S.elems clauses)
 
 
 -- first value: CNF that could either not be left aligned or contains join statemt.
@@ -721,18 +713,17 @@ prepareWhereClauseFlatten tree  = case (build bb, build aa) of
 prepareWhereClause :: LogicTree ParsedComp
                    -> (Maybe (PosCNF ParsedComp),
                        M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar)))
-prepareWhereClause tree = rrr
+prepareWhereClause tree = case orderCnfMaybe of
+  Nothing -> (mixCnfMaybe, M.empty)
+  Just lefts -> case splitPosCnfCompOrder lefts of
+    (Nothing, m) -> (mixCnfMaybe, m)
+    (Just aa, m) -> case mixCnfMaybe of
+      Nothing -> (Just $ convertBack aa , m);
+      Just bb -> (Just $ conjunction (convertBack aa) bb, m)
   where
     (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ toCnf tree
-    --convertBack :: PosCNF (CompOrder ColumnQualified SomeNumber) -> PosCNF ParsedComp
+    convertBack :: PosCNF (CompOrder ColumnQualified SomeScalar) -> PosCNF ParsedComp
     convertBack = mapPosCnfLiterals (mapComp Read someScalarMathExpr)
-    rrr = case orderCnfMaybe of
-      Nothing -> (mixCnfMaybe, M.empty)
-      Just lefts -> case splitPosCnfCompOrder lefts of
-                      (Nothing, m) -> (mixCnfMaybe, m)
-                      (Just aa, m) -> case mixCnfMaybe of
-                                        Nothing -> (Just $ convertBack aa , m);
-                                        Just bb -> (Just $ conjunction (convertBack aa) bb, m)
 
 
 mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
@@ -740,11 +731,12 @@ mapAssoc2 k1 k2 v m = case M.lookup k1 m of
   Nothing -> M.insert k1 (M.insert k2 v M.empty) m
   Just m2 -> M.insert k1 (M.insert k2 v m2)      m
 
+
 data ProcessError = PE String deriving (Eq, Show, Ord)
+
 
 instance PrClj ProcessError where
   pr (PE s) = "{:error " ++ show s ++"}"
-
 
 
 -- parse and move names, aliases, expressions to right layer.
@@ -985,13 +977,6 @@ expandEquivalences equivs cnf = newCnf
     allTheSame (x:xs) = all (== x) xs
 
 -- == types required: integer, double, string, date
-
 -- TODO: Date support.
 -- TODO: JOIN ON support.
--- TODO: equivalence classes on conditions and spreading conditions to subq
--- TODO: test nested selects.
-
-
 -- TODO: See http://dev.mysql.com/doc/refman/5.7/en/expressions.html
-
--- TODO: Date parsing.
