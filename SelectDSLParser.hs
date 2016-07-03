@@ -357,9 +357,9 @@ parseIdentifier = idBacktick <|> id1
       _ <- char '`';
       return s}
     id1 = do {
-      firstChar <- many1 letter;
-      restChar <- many $ alphaNum <|> oneOf "_:";
-      return $ firstChar ++ restChar}
+      firstChar <- letter <|> oneOf "_$";
+      restChar <- many (alphaNum <|> oneOf "_:$");
+      return $ firstChar : restChar}
 
 
 
