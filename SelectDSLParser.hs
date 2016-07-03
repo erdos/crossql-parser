@@ -19,7 +19,7 @@ import qualified Data.Set as S
   (Set, union, empty, insert, elems, fromList,map, null, intersection,size)
 import qualified Data.Map.Strict as M
   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
-    mapWithKey, traverseWithKey, elems, member, alter)
+    mapWithKey, traverseWithKey, elems, member, alter, intersection, union, null)
 
 import Data.Either()
 import Data.Foldable (Foldable, foldMap, concat, find)
@@ -420,7 +420,6 @@ instance Foldable LogicTree where
   foldMap f (Or a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Not a)  = foldMap f a
 
-  --  fmap f x = undefined
 
 parseLogicTree :: Parser a -> Parser (LogicTree a)
 parseLogicTree pa = _start
@@ -532,7 +531,6 @@ parseSimpleQuery =
 
     toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
     toWhereClause t = fmap $ mapComp1 $ fmap $ CQ t
-    --toWhereClause = undefined
 
     parseFrom :: Parser (Either ParsedQueryTree TableName)
     parseFrom = try  (Right <$> parseTableName)
@@ -852,26 +850,10 @@ processTree (PQT columnMap tableMap whereClause)
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
                            M.empty columnMap
 
-    -- whereClause = expandEquivalences whereClause1
 
-handleLine :: String -> IO ()
-handleLine line =
-  case runParser parseQuery () "" line of
-    (Left pe) -> putStrLn $ ":error"  ++ show pe
-    (Right b) -> case processTree b of
-                   (Left err) -> putStrLn $ pr err
-                   (Right tree) -> putStrLn $ pr tree
-
-main :: IO ()
-main = do
-  hSetBuffering stdout LineBuffering;
-  c <- getContents;
-  forM_ (lines c) handleLine
-
--- END
-
-mergeFromClauses :: ParsedFromClause -> ParsedFromClause -> ParsedFromClause
-mergeFromClauses = undefined
+-- tries to merge two FromClause maps, return Nothing when keys overlap.
+mergeFromClauses :: ParsedFromClause -> ParsedFromClause -> Maybe ParsedFromClause
+mergeFromClauses a b = if M.null $ M.intersection a b then Just $ M.union a b else Nothing
 
 
 parseJoin :: Parser (ParsedFromClause, ParsedWhereClause)
@@ -884,7 +866,7 @@ parseJoin1 :: Parser ((TableAlias, Either ParsedQueryTree TableName), ParsedWher
 parseJoin1 = do
   _ <- stringI "JOIN";
   spaces;
-  (tAlias,t) <- parseFromClause1;
+  (tAlias, t) <- parseFromClause1;
   spaces;
   _<- stringI "ON";
   spaces;
@@ -892,7 +874,7 @@ parseJoin1 = do
   return ((tAlias, t), onClause)
 
 
--- TODO: optimize this one
+-- transitive closure of a list of equivalences. TODO: maybe optimize this.
 spanEquations :: forall a. (Eq a, Ord a) => [(a,a)] -> [(a,a)]
 spanEquations [] = []
 spanEquations [(x,y)] = if x == y then [(x,y)] else [(x,y), (y,x)]
@@ -961,6 +943,21 @@ expandEquivalences equivs cnf = newCnf
     allTheSame [] = True
     allTheSame [_] = True
     allTheSame (x:xs) = all (== x) xs
+
+
+handleLine :: String -> IO ()
+handleLine line =
+  case runParser parseQuery () "" line of
+    (Left pe) -> putStrLn $ ":error"  ++ show pe
+    (Right b) -> case processTree b of
+                   (Left err) -> putStrLn $ pr err
+                   (Right tree) -> putStrLn $ pr tree
+
+main :: IO ()
+main = do
+  hSetBuffering stdout LineBuffering;
+  c <- getContents;
+  forM_ (lines c) handleLine
 
 -- == types required: integer, double, string, date
 -- TODO: Date support.
