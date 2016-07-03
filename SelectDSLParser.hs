@@ -773,25 +773,15 @@ processTree (PQT columnMap tableMap whereClause)
           parentJoin     =  joinClause -- maybe rework it?
 
   --- => SELECT ... FROM (SELECT ...) WHERE ...
-  | [(tAlias, Left _)] <- M.assocs tableMap,
-    (Just _)           <- M.lookup tAlias whereMap
-  = case whereJoin of
-      -- outer table has only left-aligned filters -> can be moven inwards.
-      -- TODO: implement this
-      Nothing -> Left $ PE "No JOIN on outer table.."
-      -- outer table has mixed filters.
-      -- TODO: implement this.
-      (Just _) -> Left $ PE "not implemented: outer table has mixed filters"
- {-       case processTree subTable of
-          (Left pe) -> Left pe;
-          (Right child) -> Right $ NestedRQT pc m parentJoin
-            where
-              pc     = M.mapWithKey (\k (CQ q _) -> CQ q k) columnMap
-              m      = M.insert tAlias child M.empty
-              parentJoin =  joinClause -- maybe rework it?
--}
+  {-
+  | [(tAlias, Left parsedSubtree)] <- M.assocs tableMap, (Just _) <- M.lookup tAlias whereMap, Nothing <- whereJoin
+  = case processTree parsedSubtree of
+      Left err -> Left err
+      Right (SimpleRQT _ _ _) -> Left $ PE "Not impl: only one simple?"
+      Right (NestedRQT _ _ _) -> Left $ PE "Not impl: made one?"
+  -}
   | [(tAlias, Right (TN tName))] <- M.assocs tableMap,
-    Nothing                 <- M.lookup tAlias whereMap -- maybe alias for full table name too.
+    Nothing <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
   | Nothing <- whereJoin
   = Left $ PE "Missing JOIN conditions!"

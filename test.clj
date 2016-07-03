@@ -236,8 +236,47 @@
 
 (testing "One nested select with join expression and filter on outside"
   "SELECT id FROM (SELECT id, key FROM t where day>2) WHERE id>5 and id==key"
+  {:select {id $/id},
+   :from
+   {$ {:select {id id, key key},
+       :from t,
+       :where (cnf [(> day 2)] [(> id 5)] [(> key 5)])}},
+   :where (cnf [(== $/id $/key)])}  )
+
+(testing "One nested select with join expression and filter on outside"
+  "SELECT id FROM (SELECT id, key, aa FROM t where day>2) WHERE aa>5 and id==key"
+  {:select {id $/id},
+   :from {$ {:select {aa aa, id id, key key},
+             :from t,
+             :where (cnf [(> aa 5)] [(> day 2)])}},
+   :where (cnf [(== $/id $/key)])} )
+
+(testing "Like prev but with table alias."
+  "SELECT t.id FROM (SELECT id, key, aa FROM t where day>2) AS t WHERE t.aa>5 and t.id==t.key"
+  {:select {t.id t/id},
+   :from {t {:select {aa aa, id id, key key},
+             :from t,
+             :where (cnf [(> aa 5)] [(> day 2)])}},
+   :where (cnf [(== t/id t/key)])})
+
+(testing "Nested deep"
+  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2) WHERE id>3"
+  nil)
+
+(testing "Nested deep"
+  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1 and c==d) WHERE a>2) WHERE id>3"
+  nil)
+
+
+(testing "Nested deep"
+  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a<id) WHERE id>3"
+  nil)
+
+
+(testing "Nested deep moves join guard outside, filters inside."
+  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a < id) WHERE id>3"
   {:select {id $/id}
-   :from {$ {:select {id id, key key}
+   :from {$ {:select {id id}
              :from t
-             :where (cnf [(> day 2)] [(> id 5)])}}
-   :where (cnf [(== $/id $/key)])})
+             :where (cnf [(> a 2)] [(== b 1)] [(> id 3)])}}
+   :where (cnf [(< $/a $/id)])})
