@@ -27,7 +27,8 @@
     (if (= value expected)
       (do
         (println nr \tab (str green! "✓ " name clear!) (str delta "ms"))
-        context)
+        (-> context
+            (update :total inc)))
       (do
         (println)
         (println nr \tab (str red! "✘ " name clear!) (str delta "ms"))

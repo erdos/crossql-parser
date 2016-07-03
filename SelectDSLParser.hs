@@ -8,10 +8,10 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (MathExpr(..),  ResultQueryTree(..), ParsedQueryTree(..),
-             CompOrder(..), PrClj(..), SomeScalar,
-             parseColumnEitherQualified, tryParser, handleLine, main, scalarToMathExpr, maybeEvalScalar,
-             collectReads, mergeFromClauses, parseJoin) where
+module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin) where
+
+import Control.Monad
+import Control.Applicative ((<$>))
 
 import Data.Char(toUpper)
 
@@ -21,15 +21,13 @@ import qualified Data.Map.Strict as M
   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
     mapWithKey, traverseWithKey, elems, member, alter)
 
-import Control.Monad
-import Control.Applicative ((<$>))
-
 import Data.Either()
-import Data.List (intercalate)
 import Data.Foldable (Foldable, foldMap, concat, find)
-import Data.Monoid (mempty, mappend)
+import Data.List (intercalate)
 import Data.Maybe(listToMaybe, mapMaybe)
--- import Data.Tuple(swap)
+import Data.Monoid (mempty, mappend)
+
+import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
 
 import Text.Parsec as TP
   (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
@@ -39,9 +37,6 @@ import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
-import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
-
--- type SomeNumber = Either Integer Double
 
 data SomeScalar = DD Double | II Integer | SS String deriving (Eq, Show, Ord)
 
@@ -73,10 +68,6 @@ instance Foldable MathExpr where
   foldMap f (Mul a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Div a b) = foldMap f a `mappend` foldMap f b
 
-
--- numberToMathExpr :: SomeNumber -> MathExpr a
--- numberToMathExpr (Left i) = I i
--- numberToMathExpr (Right d) = D d
 
 scalarToMathExpr :: SomeScalar -> MathExpr a
 scalarToMathExpr (DD d) = D d
