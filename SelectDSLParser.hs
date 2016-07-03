@@ -588,8 +588,8 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
--- collectPosCnfLiterals :: PosCNF a -> [a]
--- collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
+collectPosCnfLiterals :: PosCNF a -> [a]
+collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
 
 conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
 conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
@@ -740,12 +740,6 @@ mapAssoc2 k1 k2 v m = case M.lookup k1 m of
   Nothing -> M.insert k1 (M.insert k2 v M.empty) m
   Just m2 -> M.insert k1 (M.insert k2 v m2)      m
 
-
-processTreeSimple :: M.Map ColumnAlias ColumnName
-  -> TableName -> PosCNF (CompOrder ColumnName SomeScalar)  -> ResultQueryTree
-processTreeSimple = SimpleRQT
-
-
 data ProcessError = PE String deriving (Eq, Show, Ord)
 
 instance PrClj ProcessError where
@@ -755,34 +749,36 @@ instance PrClj ProcessError where
 
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
-processTree (PQT columnMap tableMap whereClause)
 
-  -- and unknown table alias is used in a WHERE condition
-  | (Just (TA tAlias)) <- msum $ fmap (\(CQ t _) ->
-                                if not $ M.member t tableMap
-                                then Just t else Nothing)  (collectCQ whereClause)
+-- an unknown table alias is used in the WHERE clause
+processTree (PQT _ tableMap whereClause)
+  | (Just (TA tAlias)) <- msum $ f <$> collectCQ whereClause
   = Left $ PE $ "Unexpected table name in WHERE clause: " ++ tAlias
+  where f (CQ t _) = if not $ M.member t tableMap then Just t else Nothing
 
-  -- an unknown table alias is used in SELECT clause
-  | (Just (TA tAlias)) <- msum $ fmap (\(CQ t _) ->
-                                         if not $ M.member t tableMap
-                                          then Just t else Nothing) (M.elems columnMap)
-    = Left $ PE $ "Unecpected table name in SELECT clause: " ++ tAlias
+-- an unknown table alias is used in SELECT clause
+processTree (PQT columnMap tableMap _)
+  | (Just (TA tAlias)) <- msum $ f <$> M.elems columnMap
+  = Left $ PE $ "Unecpected table name in SELECT clause: " ++ tAlias
+  where f (CQ t _) = if not $ M.member t tableMap then Just t else Nothing
 
+processTree (PQT columnMap tableMap whereClause)
   --- => SELECT ... FROM tname WHERE ...
   | [(tAlias, Right tName)] <- M.assocs tableMap,
-    (Just cnf)              <- M.lookup tAlias whereMap
-                               -- maybe alias for full table name too.
+    (Just cnf)              <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = case whereJoin of
-      Nothing -> Right $ processTreeSimple cMap tName cnf
+      Nothing           -> Right $ SimpleRQT cMap tName cnf
       (Just joinClause) -> Right parent
         where
-          child  = SimpleRQT cMap tName cnf
-          parent = NestedRQT pc m parentJoin
-          pc :: M.Map ColumnAlias ColumnQualified
-          pc     = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
-          m      = M.insert tAlias child M.empty
-          parentJoin =  joinClause -- maybe rework it?
+          child  = SimpleRQT cMap2 tName cnf
+          parent = NestedRQT parentColumns parentTableMap parentJoin
+          -- we collect column names from the parent WHERE clause and insert them to child SELECT clause
+          -- so they are available from the outside
+          cMap2  = foldl (\cm (CQ _ (CN cn)) -> M.insert (CA cn) (CN cn) cm) cMap columnsFromJoinClause
+          columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map getCompSides $ collectPosCnfLiterals parentJoin
+          parentColumns  = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
+          parentTableMap = M.insert tAlias child M.empty
+          parentJoin     =  joinClause -- maybe rework it?
 
   --- => SELECT ... FROM (SELECT ...) WHERE ...
   | [(tAlias, Left _)] <- M.assocs tableMap,
@@ -844,10 +840,10 @@ processTree (PQT columnMap tableMap whereClause)
             -- error is propagated
             (Left a) -> Left a
     makeSubTable sTabAlias (Right subTableName)
-    -- TODO: maybe map back names, i am not sure.
       |        (Just cnf) <- M.lookup sTabAlias whereMap,
         (Just colAliases) <- M.lookup sTabAlias subTableColAliases,
-            simpleColAliases <- M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs colAliases
+        -- we map back names
+         simpleColAliases <- M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs colAliases
       = Right $ SimpleRQT simpleColAliases subTableName cnf
       | otherwise = Left $ PE "SELECT or WHERE clause is missing."
     cMap = M.map (\(CQ _ columnName) -> columnName) columnMap

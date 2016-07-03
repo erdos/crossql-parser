@@ -26,6 +26,8 @@ _An SQL query rewrite engine_
 => {:select {t.a a} :from t :where (cnf [(< x 12)] [(>= y 3)])}
 ```
 
+More examples and expected results can be found in the `test.clj` file. You may need to install `boot` to run the test suite.
+
 ### <a href="Input.md">Input format</a>
 
 ### <a href="Output.md">Output format</a>
