@@ -459,7 +459,7 @@ parseWhereClause1 p = unfoldLogicTree <$> parseLogicTree (try parse_between <|> 
       _ <- stringI "AND";
       spaces;
       x2 <- parseMathExpr p;
-      return $ And (Leaf (CST x1 colname)) (Leaf (CST colname x2))
+      return $ And (Leaf (CSEQ x1 colname)) (Leaf (CSEQ colname x2))
 
 unfoldLogicTree :: LogicTree (LogicTree a) -> LogicTree a
 unfoldLogicTree (And a b) = And (unfoldLogicTree a) (unfoldLogicTree b)
@@ -810,10 +810,25 @@ processTree (PQT columnMap tableMap whereClause)
   | (Right tts)           <- subTables,
     (Just joinConditions) <- whereJoin
     -- here: filter aliases from select and condition and replace them with aliases from subtables.
-  =  Right $ NestedRQT columnMap tts joinConditions
+  = let columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map getCompSides $ collectPosCnfLiterals joinConditions
+        columnsForTab :: TableAlias -> [ColumnName]
+        columnsForTab ta = mapMaybe (\(CQ t c) -> if t==ta then Just c else Nothing) columnsFromJoinClause
+
+        ff tableAlias (SimpleRQT colMap b c) = SimpleRQT newColMap b c
+          where columns = columnsForTab tableAlias
+                newColMap = foldl (\aa (CN x) -> M.insertWith (\_ t -> t) (CA x) (CN x) aa) colMap columns
+
+        ff _ nm  = nm -- @(NestedRQT colMap b c) = nm -- NestedRQT newColMap b c
+        -- where columns = columnsForTab tableAlias
+        --      newColMap = foldl (\aa (CN x) -> M.insert (CA x) (CN x) aa) colMap columns
+        -- we add column aliases from joinConditions to subqueries (when missing).
+        ttsWithJoinAliases = M.mapWithKey ff tts
+    in Right $ NestedRQT columnMap ttsWithJoinAliases joinConditions
+  -- where newColumnMap = columnMap
   | otherwise = Left $ PE "Unexpected case"
   where
 
+    subTables :: Either ProcessError (M.Map TableAlias ResultQueryTree)
     subTables = M.traverseWithKey makeSubTable tableMap
     makeSubTable :: TableAlias -> Either ParsedQueryTree TableName
                  -> Either ProcessError ResultQueryTree

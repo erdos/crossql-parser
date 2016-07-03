@@ -6,27 +6,33 @@
          '[clojure.java.shell]
          '[clojure.string])
 
-(def cmd "ghc /home/jano/Work/socql/resources/hs/SelectDSLParser.hs -e main")
+(def cmd "ghc SelectDSLParser.hs -e main")
 
 ;; (-main)
 
-(defn run-test [context {:keys [input output expected nr name]}]
-  (let [output (-> ((:evaluator context) input))
+(defmacro timer [expr]
+  `(let [t1# (System/currentTimeMillis)
+         x# ~expr
+         t2# (System/currentTimeMillis)]
+     {:value x#, :delta (- t2# t1#)}))
+
+(defn run-test [context {:keys [input expected nr name]}]
+  (let [{:keys [value delta]} (-> input ((:evaluator context)) (timer))
         green! (str \u001b "[32m")
         red! (str \u001b "[31m")
         clear! (str \u001b "[0m")
         gray! (str \u001b "[37m")]
-    (if (= output expected)
+    (if (= value expected)
       (do
-        (println nr \tab (str green! "✓ " name clear!))
+        (println nr \tab (str green! "✓ " name clear!) (str delta "ms"))
         context)
       (do
-        (println nr \tab (str red! "✘ " name clear!))
+        (println nr \tab (str red! "✘ " name clear!) (str delta "ms"))
         (println "input: " gray! input clear!)
         (println "expected: ")
         (print gray!) (pprint expected) (print clear!)
         (println "got: ")
-        (print red!) (pprint output) (print clear!)
+        (print red!) (pprint value) (print clear!)
         (println (str \u001b  "[0m"))
         (-> context
             (update :failed conj nr))))))
@@ -135,3 +141,22 @@
              :from {webpage {:select {x xx, y yy, aa aa, bb bb}, :from webpage, :where (cnf [(== id 1)])}},
              :where (cnf [(== webpage/aa webpage/bb)])}},
    :where (cnf [(== t/x t/y)])})
+
+;; FEATURE: all kinds of relations
+(testing "Simple query with all kinds of relations"
+  "SELECT id FROM t WHERE a==1 and b<=2 and c>=3 and d<4 and e>5 and f!=6 and g<>7 and h BETWEEN 8 and 9"
+  {:select {id id}, :from t,
+   :where
+   (cnf [(< d 4)] [(> e 5)] [(== a 1)] [(>= c 3)] [(>= h 8)] [(<= b 2)] [(<= h 9)] [(!= f 6)] [(!= g 7)])})
+
+;; FEATURE: conditions propagate over equivalences to submaps.
+(testing "Two simple subquery share the same interval"
+  "SELECT t1.id, t2.id from t1, t2 where t1.day==t2.weekDay and t1.day between 1 and 7"
+  {:select {t1.id t1/id, t2.id t2/id},
+   :from {t1 {:select {day day, id id},
+              :from t1,
+              :where (cnf [(>= day 1)] [(<= day 7)])},
+          t2 {:select {weekDay weekDay, id id},
+              :from t2,
+              :where (cnf [(>= weekDay 1)] [(<= weekDay 7)])}},
+   :where (cnf [(== t1/day t2/weekDay)])})
