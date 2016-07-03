@@ -20,22 +20,38 @@
   (let [{:keys [value delta]} (-> input ((:evaluator context)) (timer))
         green! (str \u001b "[32m")
         red! (str \u001b "[31m")
+        cyan! (str \u001b "[36m")
         clear! (str \u001b "[0m")
         gray! (str \u001b "[37m")]
+
     (if (= value expected)
       (do
         (println nr \tab (str green! "✓ " name clear!) (str delta "ms"))
         context)
       (do
+        (println)
         (println nr \tab (str red! "✘ " name clear!) (str delta "ms"))
-        (println "input: " gray! input clear!)
-        (println "expected: ")
-        (print gray!) (pprint expected) (print clear!)
-        (println "got: ")
+        (println (str gray! "input: ") cyan! input clear!)
+        (println (str gray! "expected: "))
+        (print cyan!) (pprint expected) (print clear!)
+        (println (str gray! "got: "))
         (print red!) (pprint value) (print clear!)
-        (println (str \u001b  "[0m"))
+        (println clear!) (println)
         (-> context
-            (update :failed conj nr))))))
+            (update :failed conj nr)
+            (update :total  inc))))))
+
+(def -counter (atom 0))
+
+(defmacro testing [name input expected]
+  (assert (string? name))
+  (swap! -counter inc)
+  `(def ~(symbol (str "test-case-" @-counter))
+     {:input '~input :expected '~expected :name ~name :nr ~(deref -counter)}))
+
+(defn test-cases []
+  (sort-by :nr
+    (for [[kname v] (ns-map *ns*) :when (.startsWith (name kname) "test-case-")] @v)))
 
 (defn -main [& args]
   (println "starting test..")
@@ -52,29 +68,13 @@
                    (.write out 10)
                    (.flush out)))
         ask!   (fn [s] (write! s) (read!))
-        tests (for [[kname v] (ns-map *ns*)
-                    :when (.startsWith (name kname) "test-case-")]
-                @v)
-        tests (sort-by :nr tests)
-        context {:failed [], :evaluator ask!}
-        state (reduce run-test context tests)
-        ]
+        state (reduce run-test {:failed [], :evaluator ask!, :total 0} (test-cases))]
     (.destroy proc)
     ;;(println context)
     (when-let [failed (seq (:failed state))]
       (println "FAILED:" (clojure.string/join ", " failed)))
-    (println "TOTAL:" (count tests) "tests")
+    (println "TOTAL:" (:total state) "tests")
     :ok))
-
-(def -counter (atom 0))
-
-(defmacro testing [name input expected]
-  (assert (string? name))
-  (swap! -counter inc)
-  `(def ~(symbol (str "test-case-" @-counter))
-     {:input '~input :expected '~expected :name ~name
-      :nr ~(deref -counter)
-      }))
 
 
                                         ; TEST CASES
