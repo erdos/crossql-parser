@@ -24,7 +24,7 @@ import Control.Applicative ((<$>))
 
 import Data.Either()
 import Data.List (intercalate)
-import Data.Foldable (Foldable, foldMap, concat)
+import Data.Foldable (Foldable, foldMap, concat, find)
 import Data.Monoid (mempty, mappend)
 import Data.Maybe(listToMaybe, mapMaybe)
 -- import Data.Tuple(swap)
@@ -588,17 +588,16 @@ data PosClause a = PosC (S.Set a)
 data PosCNF a = PosClauses (S.Set (PosClause a))
   deriving (Eq, Show, Read, Ord)
 
-collectPosCnfLiterals :: PosCNF a -> [a]
-collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
-
-conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
-conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
-
 
 toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
   where f (PosNeg gg hh) = PosC (S.union gg (S.map negateComp hh))
 
+collectPosCnfLiterals :: PosCNF a -> [a]
+collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
+
+conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
+conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
 
 -- like `fmap` for PosCNF
 mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
@@ -822,22 +821,31 @@ processTree (PQT columnMap tableMap whereClause)
         Nothing -> processTree pqt
         (Just cnf) ->
           case processTree pqt of
+            (Left a) -> Left a -- error is propagated
             (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause)
               where
-
+                cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
+                aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
                 asSimple = M.fromList $ map (\ (CA _, CQ ta (CN cn)) -> (CA cn, CQ ta (CN cn))) $ M.assocs as
-                -- todo: map back col aliases in cnf to col names (using `as`)
+                -- TODO: maybe map back col aliases in cnf to col names (using `as`)
                 mergedWhereClause = conjunction cnf2
                                       (mapPosCnfLiterals
                                         (mapComp (Read . aliasToQualified)
                                          scalarToMathExpr) (cnfColNameToAlias cnf))
-            -- TODO: map back col aliases in cnf to col names (using `as`)
-            (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnf cnf2)
+            (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnfRenamed cnf2)
               where
-                -- TODO: do I need asSimple?
-                asSimple = M.fromList $ map (\ (CA _, CN cn) -> (CA cn, CN cn)) $ M.assocs as
-            -- error is propagated
-            (Left a) -> Left a
+                -- we map back column aliases in the WHERE clause
+                cnfRenamed = mapPosCnfLiterals (mapComp mapColName id) cnf
+                mapColName :: ColumnName -> ColumnName
+                mapColName (CN colName) = case M.lookup (CA colName) as of
+                  (Just cn) -> cn
+                  Nothing   -> CN colName
+                -- we map back column aliases in the SELECT clause.
+                asSimple = M.fromList $ map (\ (CA _, CN cn) -> (nameToAlias (CN cn), CN cn)) $ M.assocs as
+                nameToAlias :: ColumnName -> ColumnAlias
+                nameToAlias (CN cn) = case find (\(_, CN v) -> v == cn) (M.assocs as) of
+                                        Nothing -> CA cn
+                                        Just (k, _) -> k
     makeSubTable sTabAlias (Right subTableName)
       |        (Just cnf) <- M.lookup sTabAlias whereMap,
         (Just colAliases) <- M.lookup sTabAlias subTableColAliases,
@@ -846,13 +854,6 @@ processTree (PQT columnMap tableMap whereClause)
       = Right $ SimpleRQT simpleColAliases subTableName cnf
       | otherwise = Left $ PE "SELECT or WHERE clause is missing."
     cMap = M.map (\(CQ _ columnName) -> columnName) columnMap
-
-    aliasToQualified ::ColumnAlias -> ColumnQualified
-    aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
-
-    cnfColNameToAlias :: PosCNF (CompOrder ColumnName SomeScalar) -> PosCNF (CompOrder ColumnAlias SomeScalar)
-    cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
-
 
     (whereJoin, whereMap) = prepareWhereClause whereClause
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)

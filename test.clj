@@ -195,12 +195,11 @@
    :where (cnf [(== x/xid y/yid)])})
 
 
-;; this fails: see column names in x
 (testing "Two subquery - one table name, one subexpr"
   "Select x.xid, y.yid From (SELECT id As xid from t where id > 1) As x, y As y Where x.xid==y.yid and y.yid > 12"
   {:select {x.xid x/xid, y.yid y/yid},
    :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)] [(> id 12)])},
-          y {:select {yid yid}, :from y, :where (cnf [(> yid 10)])}},
+          y {:select {yid yid}, :from y, :where (cnf [(> yid 12)])}},
    :where (cnf [(== x/xid y/yid)])})
 
 
@@ -211,6 +210,7 @@
    :where (cnf [(> day 2)] [(> id 5)])})
 
 
+;; FAILS
 (testing "One nested select with alias without join expression"
   "SELECT p.id FROM (SELECT id FROM t where day>2) AS p WHERE p.id>5"
   {:select {id id}
@@ -267,14 +267,8 @@
   "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1 and c==d) WHERE a>2) WHERE id>3"
   nil)
 
-
-(testing "Nested deep"
-  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a<id) WHERE id>3"
-  nil)
-
-
 (testing "Nested deep moves join guard outside, filters inside."
-  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a < id) WHERE id>3"
+  "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a<id) WHERE id>3"
   {:select {id $/id}
    :from {$ {:select {id id}
              :from t
