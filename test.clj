@@ -160,3 +160,32 @@
               :from t2,
               :where (cnf [(>= weekDay 1)] [(<= weekDay 7)])}},
    :where (cnf [(== t1/day t2/weekDay)])})
+
+
+(testing "Simple scalar expression evaluation"
+  "SELECT id FROM table WHERE seconds==24*60*60"
+  {:select {id id}
+   :from table
+   :where (cnf [(== seconds 86400)])})
+
+(testing "Two subquery as select expressions"
+  "Select x.id, y.id From (SELECT id from t where id > 1) As x, (SELECT id from t where id > 10) As y Where x.id==y.id"
+  {:select {x.id x/id, y.id y/id},
+   :from {x {:select {id id}, :from t, :where (cnf [(> id 1)])},
+          y {:select {id id}, :from t, :where (cnf [(> id 10)])}},
+   :where (cnf [(== x/id y/id)])})
+
+
+(testing "Two subquery as select expressions w alias"
+  "Select x.xid, y.yid From (SELECT id As xid from t where id > 1) As x, (SELECT id As yid from t where id > 10) As y Where x.xid==y.yid"
+  {:select {x.xid x/xid, y.yid y/yid},
+   :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)])},
+          y {:select {yid id}, :from t, :where (cnf [(> id 10)])}},
+   :where (cnf [(== x/xid y/yid)])})
+
+(testing "Two subquery - one table name, one subexpr"
+  "Select x.xid, y.yid From (SELECT id As xid from t where id > 1) As x, y As y Where x.xid==y.yid and y.yid > 12"
+  {:select {x.xid x/xid, y.yid y/yid},
+   :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)])},
+          y {:select {yid yid}, :from y, :where (cnf [(> yid 10)])}},
+   :where (cnf [(== x/xid y/yid)])})
