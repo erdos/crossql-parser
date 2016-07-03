@@ -186,6 +186,6 @@
 (testing "Two subquery - one table name, one subexpr"
   "Select x.xid, y.yid From (SELECT id As xid from t where id > 1) As x, y As y Where x.xid==y.yid and y.yid > 12"
   {:select {x.xid x/xid, y.yid y/yid},
-   :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)])},
+   :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)] [(> id 12)])},
           y {:select {yid yid}, :from y, :where (cnf [(> yid 10)])}},
    :where (cnf [(== x/xid y/yid)])})
