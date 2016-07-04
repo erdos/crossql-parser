@@ -593,6 +593,7 @@ cnfAddClause x (PosClauses cs) = PosClauses (S.insert x cs)
 maybeLeftAlign :: Comp (MathExpr t) -> Maybe (CompOrder t SomeScalar)
 maybeLeftAlign t = f a b
   where
+    f (Read _) (Read _) = Nothing
     f (Read c) x = case maybeEvalScalar x of
       Just (DD d)  -> Just $ compToCompOrder t c $ DD d
       Just (II i) -> Just $ compToCompOrder t c $ II i
@@ -605,7 +606,6 @@ maybeLeftAlign t = f a b
       Nothing ->  Nothing
     f _  _ = Nothing
     (a, b) = getCompSides t
-
     compToCompOrder :: Comp a -> b -> c -> CompOrder b c
     compToCompOrder (CST _ _) = CST
     compToCompOrder (CLT _ _) = CLT
@@ -613,11 +613,6 @@ maybeLeftAlign t = f a b
     compToCompOrder (CNEQ _ _) = CNEQ
     compToCompOrder (CSEQ _ _) = CSEQ
     compToCompOrder (CLEQ _ _) = CLEQ
-
-
---maybeEquation :: Comp (MathExpr t) -> Maybe (t,t)
---maybeEquation (CEQ (Read a) (Read b)) = Just (a,b)
---maybeEquation _ = Nothing
 
 
 tryParser :: String -> Parser a -> Either ParseError a
