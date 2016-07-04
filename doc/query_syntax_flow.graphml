@@ -533,7 +533,7 @@
         <y:GenericNode configuration="com.yworks.flowchart.process">
           <y:Geometry height="24.0" width="82.5" x="306.4999999999999" y="901.9929401901015"/>
           <y:Fill color="#FFFFFF" transparent="false"/>
-          <y:BorderStyle color="#000000" type="line" width="2.0"/>
+          <y:BorderStyle color="#000000" type="line" width="1.0"/>
           <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="11" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="16.8046875" modelName="custom" textColor="#000000" visible="true" width="56.18017578125" x="13.159912109375" y="3.59765625">predicate<y:LabelModel>
               <y:SmartNodeLabelModel distance="4.0"/>
             </y:LabelModel>
@@ -590,7 +590,7 @@
         <y:GenericNode configuration="com.yworks.flowchart.process">
           <y:Geometry height="24.0" width="82.5" x="565.375" y="978.9929401901015"/>
           <y:Fill color="#E8EEF7" transparent="false"/>
-          <y:BorderStyle color="#000000" type="line" width="2.0"/>
+          <y:BorderStyle color="#000000" type="line" width="1.0"/>
           <y:NodeLabel alignment="center" autoSizePolicy="content" fontFamily="Source Code Pro" fontSize="11" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="17.82689666748047" modelName="custom" textColor="#000000" visible="true" width="10.599945068359375" x="35.95002746582031" y="3.0865516662597656">)<y:LabelModel>
               <y:SmartNodeLabelModel distance="4.0"/>
             </y:LabelModel>
@@ -1150,7 +1150,7 @@
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
+          <y:LineStyle color="#000000" type="dashed" width="1.0"/>
           <y:Arrows source="none" target="standard"/>
           <y:BendStyle smoothed="false"/>
         </y:PolyLineEdge>
@@ -1160,7 +1160,7 @@
       <data key="d10">
         <y:PolyLineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
-          <y:LineStyle color="#000000" type="line" width="1.0"/>
+          <y:LineStyle color="#000000" type="dashed" width="1.0"/>
           <y:Arrows source="none" target="standard"/>
           <y:BendStyle smoothed="false"/>
         </y:PolyLineEdge>
