@@ -24,3 +24,7 @@ After rewriting, a column name is a simple identifier as a symbol.
 A qualified column name has both a table alias (as symbol namespace)
 and a column alias (symbol name) in `table-alias/column-alias` format.
 Column names without `/` are unqualified.
+
+## Query syntax
+
+<img src="query_syntax_flow.png"/>
