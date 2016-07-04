@@ -5,10 +5,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GADTs #-}
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin) where
+module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin, Formula(..)) where
 
 import Control.Monad
 import Control.Applicative ((<$>))
@@ -24,7 +25,7 @@ import qualified Data.Map.Strict as M
 import Data.Either()
 import Data.Foldable (Foldable, foldMap, concat, find)
 import Data.List (intercalate)
-import Data.Maybe(listToMaybe, mapMaybe)
+import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
 import Data.Monoid (mempty, mappend)
 
 import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
@@ -46,6 +47,29 @@ data MathExpr a = D Double | I Integer | S String | Read a
                 | Mul (MathExpr a) (MathExpr a)
                 | Div (MathExpr a) (MathExpr a)
                 deriving (Eq, Show, Ord, Functor)
+
+-- not used (yet)
+data Formula a t where
+  Cell :: t -> Formula a t
+  LitI :: Int -> Formula Int t
+  LitS :: String -> Formula String t
+  LitD :: Double -> Formula Double t
+  IToD :: Formula Int t -> Formula Double t
+  IToS :: Formula Int t -> Formula String t
+  DToS :: Formula Double t -> Formula String t
+  -- integer
+  AddI :: Formula Int t -> Formula Int t -> Formula Int t
+  SubI :: Formula Int t -> Formula Int t -> Formula Int t
+  MulI :: Formula Int t -> Formula Int t -> Formula Int t
+  QuotI :: Formula Int t -> Formula Int t -> Formula Int t
+  -- doubles
+  AddD :: Formula Double t -> Formula Double t -> Formula Double t
+  SubD :: Formula Double t -> Formula Double t -> Formula Double t
+  MulD :: Formula Double t -> Formula Double t -> Formula Double t
+  DivD :: Formula Double t -> Formula Double t -> Formula Double t
+  -- string
+  Concat :: Formula String t -> Formula String t -> Formula String t
+
 
 collectReads :: MathExpr a -> [a]
 collectReads (Read a) = [a]
@@ -130,26 +154,30 @@ someScalarMathExpr (SS s) = S s
 
 -- TODO: eval simple expressions.
 maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
-maybeEvalScalar (D d) = Just $ DD d
-maybeEvalScalar (I i) = Just $ II i
-maybeEvalScalar (S s) = Just $ SS s
-maybeEvalScalar (Read _) = Nothing
-maybeEvalScalar _ = Nothing
+maybeEvalScalar expr = case expr of
+  (D d) -> Just $ DD d
+  (I i) -> Just $ II i
+  (S s) -> Just $ SS s
+  (Read _) -> Nothing
+  (Add a b) -> calc a b ((Just .) . (+)) ((Just .) . (+)) ((Just .) . (++))
+  (Sub a b) -> calc a b ((Just .) . (-)) ((Just .) . (-)) (\ _ _ -> Nothing)
+  (Mul a b) -> calc a b ((Just .) . (*)) ((Just .) . (*)) (\ _ _ -> Nothing)
+  (Div a b) -> calc a b ((Just .) . div) ((Just .) . (/)) (\ _ _ -> Nothing)
+  where
+    calc x y f g h = fromMaybe Nothing $ liftM2 (op f g h) (maybeEvalScalar x) (maybeEvalScalar y)
+    op :: (Integer -> Integer -> Maybe Integer) -> (Double -> Double -> Maybe Double) -> (String -> String -> Maybe String) -> SomeScalar -> SomeScalar -> Maybe SomeScalar
+    op _ f _ (DD i) (DD j) = liftM DD $ f i j
+    op _ f _ (II i) (DD d) = liftM DD $ f (fromIntegral i) d
+    op _ f _ (DD d) (II i) = liftM DD $ f d (fromIntegral i)
+    op f _ _ (II x) (II y) = liftM II $ f x y
+    op _ _ f (SS s) (DD d) = liftM SS $ f s (show d)
+    op _ _ f (SS s) (II i) = liftM SS $ f s (show i)
+    op _ _ f (DD d) (SS s) = liftM SS $ f (show d) s
+    op _ _ f (II i) (SS s) = liftM SS $ f (show i) s
+    op _ _ _ _ _ = Nothing
 
 
 {-
-maybeEvalMath :: MathExpr t -> Maybe SomeNumber
-maybeEvalMath (D d) = Just $ Right d
-maybeEvalMath (I i) = Just $ Left i
-maybeEvalMath (S _) = Nothing
-maybeEvalMath (Read _) = Nothing
-maybeEvalMath (Add a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
-  where
-    op :: SomeNumber -> SomeNumber -> SomeNumber
-    op (Left i) (Left j) = Left $ i + j
-    op (Left i) (Right d) = Right $ fromIntegral i + d
-    op (Right d) (Left i) = Right $ d + fromIntegral i
-    op (Right d) (Right dr) = Right $ d + dr
 maybeEvalMath (Sub a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
   where
     op :: SomeNumber -> SomeNumber -> SomeNumber

@@ -6,7 +6,7 @@
          '[clojure.java.shell]
          '[clojure.string])
 
-(def cmd "ghc SelectDSLParser.hs -e main")
+(def cmd "./SelectDSLParser.hs")
 
 ;; (-main)
 
