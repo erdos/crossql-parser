@@ -82,6 +82,12 @@ collectReads (Mul x y) = collectReads x ++ collectReads y
 collectReads (Div x y) = collectReads x ++ collectReads y
 
 
+scalarToMathExpr :: SomeScalar -> MathExpr a
+scalarToMathExpr (DD d) = D d
+scalarToMathExpr (II i) = I i
+scalarToMathExpr (SS s) = S s
+
+
 instance Foldable MathExpr where
   foldMap f (Read x) = f x
   foldMap _ (I _) = mempty
@@ -91,12 +97,6 @@ instance Foldable MathExpr where
   foldMap f (Sub a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Mul a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Div a b) = foldMap f a `mappend` foldMap f b
-
-
-scalarToMathExpr :: SomeScalar -> MathExpr a
-scalarToMathExpr (DD d) = D d
-scalarToMathExpr (II i) = I i
-scalarToMathExpr (SS s) = S s
 
 
 class PrClj a where
@@ -143,10 +143,6 @@ instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
     ++ "}"
 
 
--- someNumberMathExpr :: SomeNumber -> MathExpr a
--- someNumberMathExpr (Left i) = I i
--- someNumberMathExpr (Right d) = D d
-
 someScalarMathExpr :: SomeScalar -> MathExpr a
 someScalarMathExpr (II i) = I i
 someScalarMathExpr (DD d) = D d
@@ -180,32 +176,6 @@ simplifyMathExpr expr = case expr of
     op _ _ _ _ _ = Nothing
 
 
-
-{-
-maybeEvalMath (Sub a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
-  where
-    op :: SomeNumber -> SomeNumber -> SomeNumber
-    op (Left i) (Left j) = Left $ i - j
-    op (Left i) (Right d) = Right $ fromIntegral i - d
-    op (Right d) (Left i) = Right $ d - fromIntegral i
-    op (Right d) (Right dr) = Right $ d - dr
-maybeEvalMath (Mul a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
-  where
-    op :: SomeNumber -> SomeNumber -> SomeNumber
-    op (Left i) (Left j) = Left $ i * j
-    op (Left i) (Right d) = Right $ fromIntegral i * d
-    op (Right d) (Left i) = Right $ d * fromIntegral i
-    op (Right d) (Right dr) = Right $ d * dr
-maybeEvalMath (Div a b) = liftM2 op (maybeEvalMath a) (maybeEvalMath b)
-  where
-    op :: SomeNumber -> SomeNumber -> SomeNumber
-    op (Left i) (Left j) = Right $ fromIntegral i / fromIntegral j
-    op (Left i) (Right d) = Right $ fromIntegral i / d
-    op (Right d) (Left i) = Right $ d / fromIntegral i
-    op (Right d) (Right dr) = Right $ d / dr
--}
--- COMPARISON OPERATOR
-
 data CompOrder a b = CST a b
                    | CLT a b
                    | CEQ a b
@@ -216,9 +186,6 @@ data CompOrder a b = CST a b
 
 type Comp a = CompOrder a a
 
--- compLeft :: CompOrder a b -> a
--- compLeft = fst . getCompSides
-
 getCompSides :: CompOrder a b -> (a,b)
 getCompSides (CEQ p q) = (p,q)
 getCompSides (CNEQ p q) = (p,q)
@@ -227,15 +194,6 @@ getCompSides (CLT p q) = (p,q)
 getCompSides (CLEQ p q) = (p,q)
 getCompSides (CSEQ p q) = (p,q)
 
---visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
---visitComp f (CST x y) = f CST x y
---visitComp f (CLT x y) = f CLT x y
---visitComp f (CSEQ x y) = f CSEQ x y
---visitComp f (CLEQ x y) = f CLEQ x y
---visitComp f (CEQ x y) = f CEQ x y
---visitComp f (CNEQ x y) = f CNEQ x y
-
-
 mapComp :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
 mapComp f g (CEQ x y) = CEQ (f x) (g y)
 mapComp f g (CNEQ x y) = CNEQ (f x) (g y)
@@ -243,7 +201,6 @@ mapComp f g (CLT x y) = CLT (f x) (g y)
 mapComp f g (CST x y) = CST (f x) (g y)
 mapComp f g (CLEQ x y) = CLEQ (f x) (g y)
 mapComp f g (CSEQ x y) = CSEQ (f x) (g y)
-
 
 mapComp1 :: (a -> e) -> Comp a -> Comp e
 mapComp1 f = mapComp f f
