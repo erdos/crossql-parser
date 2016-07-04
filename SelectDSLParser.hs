@@ -152,29 +152,33 @@ someScalarMathExpr (II i) = I i
 someScalarMathExpr (DD d) = D d
 someScalarMathExpr (SS s) = S s
 
--- TODO: eval simple expressions.
 maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
-maybeEvalScalar expr = case expr of
+maybeEvalScalar expr = case simplifyMathExpr expr of
   (D d) -> Just $ DD d
   (I i) -> Just $ II i
   (S s) -> Just $ SS s
-  (Read _) -> Nothing
-  (Add a b) -> calc a b ((Just .) . (+)) ((Just .) . (+)) ((Just .) . (++))
-  (Sub a b) -> calc a b ((Just .) . (-)) ((Just .) . (-)) (\ _ _ -> Nothing)
-  (Mul a b) -> calc a b ((Just .) . (*)) ((Just .) . (*)) (\ _ _ -> Nothing)
-  (Div a b) -> calc a b ((Just .) . div) ((Just .) . (/)) (\ _ _ -> Nothing)
+  _ -> Nothing
+
+simplifyMathExpr :: forall t. MathExpr t -> MathExpr t
+simplifyMathExpr expr = case expr of
+  (Add a b) -> ccc expr a b ((Just .) . (+)) ((Just .) . (+)) ((Just .) . (++))
+  (Sub a b) -> ccc expr a b ((Just .) . (-)) ((Just .) . (-)) (\ _ _ -> Nothing)
+  (Mul a b) -> ccc expr a b ((Just .) . (*)) ((Just .) . (*)) (\ _ _ -> Nothing)
+  (Div a b) -> ccc expr a b ((Just .) . div) ((Just .) . (/)) (\ _ _ -> Nothing)
+  _ -> expr
   where
-    calc x y f g h = fromMaybe Nothing $ liftM2 (op f g h) (maybeEvalScalar x) (maybeEvalScalar y)
-    op :: (Integer -> Integer -> Maybe Integer) -> (Double -> Double -> Maybe Double) -> (String -> String -> Maybe String) -> SomeScalar -> SomeScalar -> Maybe SomeScalar
-    op _ f _ (DD i) (DD j) = liftM DD $ f i j
-    op _ f _ (II i) (DD d) = liftM DD $ f (fromIntegral i) d
-    op _ f _ (DD d) (II i) = liftM DD $ f d (fromIntegral i)
-    op f _ _ (II x) (II y) = liftM II $ f x y
-    op _ _ f (SS s) (DD d) = liftM SS $ f s (show d)
-    op _ _ f (SS s) (II i) = liftM SS $ f s (show i)
-    op _ _ f (DD d) (SS s) = liftM SS $ f (show d) s
-    op _ _ f (II i) (SS s) = liftM SS $ f (show i) s
+    ccc original x y f g h = fromMaybe original $ calc x y f g h
+    calc x y f g h = op f g h (simplifyMathExpr x) (simplifyMathExpr y)
+    op _ f _ (D i) (D j) = liftM D $ f i j
+    op _ f _ (I i) (D d) = liftM D $ f (fromIntegral i) d
+    op _ f _ (D d) (I i) = liftM D $ f d (fromIntegral i)
+    op f _ _ (I x) (I y) = liftM I $ f x y
+    op _ _ f (S s) (D d) = liftM S $ f s (show d)
+    op _ _ f (S s) (I i) = liftM S $ f s (show i)
+    op _ _ f (D d) (S s) = liftM S $ f (show d) s
+    op _ _ f (I i) (S s) = liftM S $ f (show i) s
     op _ _ _ _ _ = Nothing
+
 
 
 {-
