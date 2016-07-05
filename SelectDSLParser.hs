@@ -9,7 +9,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin, Formula(..)) where
+module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin, Formula(..), handleLine) where
 
 import Control.Monad
 import Control.Applicative ((<$>))
@@ -24,7 +24,7 @@ import qualified Data.Map.Strict as M
 
 import Data.Either()
 import Data.Foldable (Foldable, foldMap, concat, find)
-import Data.List (intercalate)
+import Data.List (intercalate, nub, delete)
 import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
 import Data.Monoid (mempty, mappend)
 
@@ -103,10 +103,17 @@ class PrClj a where
   pr :: a -> String
 
 instance PrClj ParseError where
-  pr pe = "{:messages " ++ concatMap f (errorMessages pe) ++ "}"
-    where f (Expect x) = show x
-          f (UnExpect x) = show x
-          f _ = "_"
+  pr pe = "{:messages "
+          ++ kv ":expected" expects
+          ++ kv ":unepxected" unexpected
+          ++ kv ":messages"   messages
+          ++  "}"
+    where
+      kv k v = " " ++ k ++ " [" ++ unwords (map show $ delete "" $ nub v) ++ "]"
+      expects = [s | Expect s <- errorMessages pe]
+      messages = [s | Message s <- errorMessages pe]
+      unexpected = [s | UnExpect s <- errorMessages pe]
+                   ++ [s | SysUnExpect s <- errorMessages pe]
 
 instance (PrClj a) => PrClj (MathExpr a) where
   pr (D d) = show d
@@ -932,7 +939,7 @@ expandEquivalences equivs cnf = newCnf
 handleLine :: String -> IO ()
 handleLine line =
   case runParser parseQuery () "" line of
-    (Left pe) -> putStrLn $ ":error"  ++ show pe
+    (Left pe) -> putStrLn $ pr pe
     (Right b) -> case processTree b of
                    (Left err) -> putStrLn $ pr err
                    (Right tree) -> putStrLn $ pr tree
