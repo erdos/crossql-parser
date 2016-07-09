@@ -9,7 +9,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Main (parseColumnEitherQualified, tryParser, main, mergeFromClauses, parseJoin, Formula(..), handleLine) where
+module Main (parseColumnEitherQualified, tryParser, main, parseJoin, Formula(..), handleLine, mergeFromClauses) where
 
 import Control.Monad
 import Control.Applicative ((<$>))
@@ -481,15 +481,15 @@ parseMathExpr f = _start
     _atom   = parens haskell _sum <|> _col <|> _number<|>_string
     _ll     = do{spaces; x <- _atom; spaces; return x} --parens haskell _sum <|> _col <|>_number <|> _string
 
+
 parseAggregateFun :: Parser a -> Parser (AggregateFunction a)
-parseAggregateFun p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt where
+parseAggregateFun p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM" Sum where
   ff s f = try $ do
     _ <-stringI s;
     _<-string"("; spaces;
     x <- p;
     spaces; _<-string ")";
     return $ f x
-
 
 
 parseSomeScalar :: Parser SomeScalar
@@ -514,7 +514,6 @@ instance Foldable LogicTree where
 parseSelectExpression :: Parser SelectExpression
 parseSelectExpression = try (SelectAggregate <$> parseAggregateFun parseColumnQualified)
                         <|> (SelectColumn <$> parseColumnQualified)
-
 
 
 parseLogicTree :: Parser a -> Parser (LogicTree a)
@@ -584,21 +583,25 @@ parseAliasedQuery =
       a <- parseGroupBySuffix;
       spaces;
       b <- optionMaybe parseHavingSuffix;
-      return (a, b)
-    --spaces;
-    --groupBy <- parseGroupByClause
-    return $ build selectMap fromClause whereClause groupByClause
+      return (a, b);
+    build selectMap fromClause whereClause groupByClause
     -- TODO: warn when aggregated selection is given but group by clause is not.
   where
-    build selectMap fromClause whereClause groupByClause =
-      PQT ca2cq fromClause whereClause groupBy
+    build selectMap fromClause whereClause groupByClause
+      | Nothing <- groupByClause, not (M.null ca2agg)
+      = fail "Aggregate functions used without GROUP BY!"
+      | Nothing <- groupByClause
+      = return $ PQT ca2cq fromClause whereClause Nothing
+      | Just _ <- groupByClause, M.null ca2agg
+      = fail "GROUP BY used without aggregate functions!"
+      | Just (a, b) <- groupByClause
+      = return $ PQT ca2cq fromClause whereClause (Just $ GroupBy ca2agg a b)
+      | otherwise = fail "Illegal state." -- could not happen.
       where
         (SMSlice ca2cq ca2agg) = splitSelectMap selectMap
 
-        groupBy = case groupByClause of
-          Just (a, b) -> Just $ GroupBy ca2agg a b
-          Nothing -> Nothing
-
+        --groupBy :: Maybe GroupingClause
+        -- groupBy = fmap (uncurry $ GroupBy ca2agg) groupByClause
 
 --data LogicTree_Disjunction a = AndD (LogicTree_Disjunction a) | NotD a | LeafD a
 --	deriving (Eq)
