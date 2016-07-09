@@ -20,10 +20,10 @@ import qualified Data.Set as S
   (Set, union, empty, insert, elems, fromList,map, null, intersection,size)
 import qualified Data.Map.Strict as M
   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
-    mapWithKey, traverseWithKey, elems, member, alter, intersection, union, null)
+    mapWithKey, traverseWithKey, member, alter, intersection, union, null, elems)
 
 import Data.Either()
-import Data.Foldable (Foldable, foldMap, concat, find)
+import Data.Foldable (Foldable, foldMap, concat)
 import Data.List (intercalate, nub, delete)
 import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
 import Data.Monoid (mempty, mappend)
@@ -32,7 +32,7 @@ import System.IO (hSetBuffering, BufferMode(LineBuffering), stdout)
 
 import Text.Parsec as TP
   (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, sepBy1, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
-import Text.Parsec.Combinator (option)
+import Text.Parsec.Combinator (option, optionMaybe)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
@@ -47,6 +47,21 @@ data MathExpr a = D Double | I Integer | S String | Read a
                 | Mul (MathExpr a) (MathExpr a)
                 | Div (MathExpr a) (MathExpr a)
                 deriving (Eq, Show, Ord, Functor)
+
+-- used in GROUP BY and HAVING clauses
+data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
+                         deriving (Eq, Show, Ord, Functor)
+
+--aggregateGetParam :: (AggregateFunction a) -> a
+--aggregateGetParam (Max x) = x
+--aggregateGetParam (Avg x) = x
+--aggregateGetParam (Cnt x) = x
+
+
+data SelectExpression = SelectAggregate (AggregateFunction ColumnQualified)
+                      | SelectColumn    ColumnQualified
+                      -- | SelectMath      (MathExpr ColumnQualified)
+                      deriving (Eq, Show, Ord)
 
 -- not used (yet)
 data Formula a t where
@@ -102,10 +117,13 @@ instance Foldable MathExpr where
 class PrClj a where
   pr :: a -> String
 
+instance (PrClj a) => PrClj [a] where
+  pr l = "[" ++ unwords (map pr l) ++ "]"
+
 instance PrClj ParseError where
-  pr pe = "{:messages "
+  pr pe = "{"
           ++ kv ":expected" expects
-          ++ kv ":unepxected" unexpected
+          ++ kv ":unexpected" unexpected
           ++ kv ":messages"   messages
           ++  "}"
     where
@@ -212,6 +230,17 @@ mapComp f g (CSEQ x y) = CSEQ (f x) (g y)
 mapComp1 :: (a -> e) -> Comp a -> Comp e
 mapComp1 f = mapComp f f
 
+parseCompOrder :: Parser a -> Parser b -> Parser (CompOrder a b)
+parseCompOrder f g = do {a <- f; spaces; c <- op; spaces; b <- g; return (c a b)}
+  where
+    op :: Parser (a -> b -> CompOrder a b)
+    x p q = string p >> return q
+    op =  try (x "<>" CNEQ)
+      <|> try (x "<=" CSEQ) <|> x "<" CST
+      <|> try (x ">=" CLEQ) <|> x ">" CLT
+      <|> try (x "==" CEQ)  <|> x "=" CEQ
+      <|> x "!=" CNEQ
+
 
 parseComp :: Parser a -> Parser (Comp a)
 parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
@@ -264,23 +293,44 @@ newtype TableAlias  = TA String deriving (Show, Eq, Ord)
 data ColumnQualified = CQ TableAlias ColumnName deriving (Show, Eq, Ord)
 type ColumnEitherQualified = Either ColumnQualified ColumnAlias
 
+type SelectMap         = M.Map ColumnAlias SelectExpression
 type ColumnMap         = M.Map ColumnAlias ColumnQualified
 type ParsedFromClause  = M.Map TableAlias (Either ParsedQueryTree TableName)
 type ParsedWhereClause = LogicTree (Comp (MathExpr ColumnQualified))
+
+data SelectMapSlice = SMSlice (M.Map ColumnAlias ColumnQualified) (M.Map ColumnAlias (AggregateFunction ColumnQualified))
+
+splitSelectMap :: SelectMap -> SelectMapSlice
+splitSelectMap m = foldl f (SMSlice M.empty M.empty) (M.assocs m)
+  where
+    f (SMSlice a b) (k, (SelectAggregate af)) = SMSlice a (M.insert k af b)
+    f (SMSlice a b) (k, SelectColumn cq)      = SMSlice (M.insert k cq a) b
 
 collectCQ :: ParsedWhereClause -> [ColumnQualified]
 collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . getCompSides) $ foldMap (:[]) w
 
 
+data GroupingClause = GroupBy (M.Map ColumnAlias (AggregateFunction ColumnQualified))
+                              [ColumnQualified]
+                              (Maybe (LogicTree (CompOrder (AggregateFunction ColumnQualified) SomeScalar)))
+                    deriving (Eq, Show)
+
+
 -- get it from parser
-data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause deriving (Eq, Show)
+data ParsedQueryTree = PQT ColumnMap ParsedFromClause ParsedWhereClause (Maybe GroupingClause)
+                     -- | PQTG SelectMap ParsedFromClause ParsedWhereClause
+                     deriving (Eq, Show)
 
 -- this is the output. also holds info on evaluation order
 data ResultQueryTree = NestedRQT
                          (M.Map ColumnAlias ColumnQualified)
                          (M.Map TableAlias ResultQueryTree)
                          (PosCNF (Comp (MathExpr ColumnQualified)))
-                     |  SimpleRQT
+                     | GroupRQT
+                         (M.Map ColumnAlias (AggregateFunction ColumnAlias))
+                         ResultQueryTree
+                         [ColumnAlias] -- group by them. also, return them. (not necessary by sql syntax)
+                     | SimpleRQT
                         (M.Map ColumnAlias ColumnName)
                         TableName
                         (PosCNF (CompOrder ColumnName SomeScalar))
@@ -298,14 +348,26 @@ instance PrClj TableName where
 instance PrClj TableAlias where
   pr (TA s) = s
 
+instance (PrClj a) => PrClj (AggregateFunction a) where
+  pr (Max x) = "(max " ++ pr x ++ ")"
+  pr (Avg x) = "(avg " ++ pr x ++ ")"
+  pr (Cnt x) = "(cnt " ++ pr x ++ ")"
+  pr (Sum x) = "(sum " ++ pr x ++ ")"
+
+
 instance PrClj ResultQueryTree where
   pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
   pr (SimpleRQT a b c) = "{:select " ++ pr a ++ " :from " ++  pr b ++ " :where " ++ pr c ++ "}"
+  pr (GroupRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :group-by " ++ pr c ++ "}"
 
 instance PrClj SomeScalar where
   pr (II x) = show x
   pr (DD x) = show x
   pr (SS x) = show x
+
+instance PrClj SelectExpression where
+  pr (SelectColumn cq) = pr cq
+  pr (SelectAggregate kk) = pr kk
 
 parseFromClause1 :: Parser (TableAlias, Either ParsedQueryTree TableName)
 parseFromClause1 = try ps2 <|> ps1 <|> ps3 where
@@ -371,19 +433,36 @@ parseColumnQualified = do {
   }
 
 
+{-
 -- map of alias to equalified.
 -- creates dummy alias keys when not given.
+-- DEPRECATED: replaced by parseSelectMap which supports group aggregation functions now!
 parseSelectClause :: Parser ColumnMap
-parseSelectClause = M.fromList <$> commaSep1 haskell part
+parseSelectClause = M.fromList <$> commaSep1 haskell selectPart
   where
-    part :: Parser (ColumnAlias, ColumnQualified)
-    part = try parseWithAlias <|> parseWithoutAlias
+    selectPart :: Parser (ColumnAlias, ColumnQualified)
+    selectPart = try parseWithAlias <|> parseWithoutAlias
     -- no alias is given: alis will be full qualified name with dot.
     parseWithoutAlias = do {qualified@(CQ (TA table) (CN column)) <- parseColumnQualified;
                             return (CA $  table ++ "." ++
                                     column, qualified)}
     -- alias is given.
     parseWithAlias = parseAsPair parseColumnQualified parseColumnAlias
+-}
+
+parseSelectMap :: Parser SelectMap
+parseSelectMap = M.fromList <$> commaSep1 haskell selectPart
+  where
+    selectPart :: Parser (ColumnAlias, SelectExpression)
+    selectPart = try parseExprWithAlias <|> try parseColWithoutAlias
+    -- no alias is given: alis will be full qualified name with dot.
+    parseColWithoutAlias = do {qualified@(CQ (TA table) (CN column)) <- parseColumnQualified;
+                            return (CA $  table ++ "." ++
+                                    column, SelectColumn qualified)}
+    -- alias is given.
+    parseExprWithAlias = parseAsPair parseSelectExpression parseColumnAlias
+
+    -- TODO: add parsing aggregate without alias (alias name shall be generated)
 
 
 parseMathExpr :: Parser a -> Parser (MathExpr a)
@@ -402,6 +481,22 @@ parseMathExpr f = _start
     _atom   = parens haskell _sum <|> _col <|> _number<|>_string
     _ll     = do{spaces; x <- _atom; spaces; return x} --parens haskell _sum <|> _col <|>_number <|> _string
 
+parseAggregateFun :: Parser a -> Parser (AggregateFunction a)
+parseAggregateFun p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt where
+  ff s f = try $ do
+    _ <-stringI s;
+    _<-string"("; spaces;
+    x <- p;
+    spaces; _<-string ")";
+    return $ f x
+
+
+
+parseSomeScalar :: Parser SomeScalar
+parseSomeScalar = s <|> n where
+  s = SS <$> stringLiteral haskell
+  n = do {x <- naturalOrFloat haskell;
+          return (case x of (Left i) -> II i; (Right d) -> DD d)}
 
 data LogicTree a = And (LogicTree a) (LogicTree a)
                  | Or  (LogicTree a) (LogicTree a)
@@ -409,12 +504,17 @@ data LogicTree a = And (LogicTree a) (LogicTree a)
                  | Leaf a
                  deriving (Eq, Show, Ord, Functor)
 
-
 instance Foldable LogicTree where
   foldMap f (Leaf x) = f x
   foldMap f (And a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Or a b) = foldMap f a `mappend` foldMap f b
   foldMap f (Not a)  = foldMap f a
+
+
+parseSelectExpression :: Parser SelectExpression
+parseSelectExpression = try (SelectAggregate <$> parseAggregateFun parseColumnQualified)
+                        <|> (SelectColumn <$> parseColumnQualified)
+
 
 
 parseLogicTree :: Parser a -> Parser (LogicTree a)
@@ -462,12 +562,14 @@ parseWhereClause = parseWhereClause1 parseColumnQualified
 parseQuery :: Parser ParsedQueryTree
 parseQuery = try parseSimpleQuery <|> parseAliasedQuery
 
+
+-- todo: parseselectclase -> parseselectmap
 parseAliasedQuery :: Parser ParsedQueryTree
 parseAliasedQuery =
   do
     _<-stringI "SELECT";
     spaces;
-    selectClause <- parseSelectClause
+    selectMap <- parseSelectMap
     spaces;
     _<-stringI "FROM";
     spaces;
@@ -475,14 +577,34 @@ parseAliasedQuery =
     spaces;
     _<-stringI "WHERE";
     spaces;
-    whereClause <- parseWhereClause
-    return (PQT selectClause fromClause whereClause)
+    whereClause <- parseWhereClause;
+    -- we maybe have a GROUP BY clause (not sure)
+    spaces;
+    groupByClause <- optionMaybe $ do
+      a <- parseGroupBySuffix;
+      spaces;
+      b <- optionMaybe parseHavingSuffix;
+      return (a, b)
+    --spaces;
+    --groupBy <- parseGroupByClause
+    return $ build selectMap fromClause whereClause groupByClause
+    -- TODO: warn when aggregated selection is given but group by clause is not.
+  where
+    build selectMap fromClause whereClause groupByClause =
+      PQT ca2cq fromClause whereClause groupBy
+      where
+        (SMSlice ca2cq ca2agg) = splitSelectMap selectMap
+
+        groupBy = case groupByClause of
+          Just (a, b) -> Just $ GroupBy ca2agg a b
+          Nothing -> Nothing
+
 
 --data LogicTree_Disjunction a = AndD (LogicTree_Disjunction a) | NotD a | LeafD a
 --	deriving (Eq)
 
 -- warning: returns reverse pair!
-parseAsPair ::Parser a -> Parser b -> Parser (b, a)
+parseAsPair :: Parser a -> Parser b -> Parser (b, a)
 parseAsPair pa pb =
   do
     a <- pa
@@ -493,14 +615,29 @@ parseAsPair pa pb =
     return (b, a)
 
 
--- parses a query with one tablename/table in it, no aliases
--- todo: maybe also support subQuery
+parseGroupBySuffix :: Parser [ColumnQualified]
+parseGroupBySuffix = do
+  _ <- stringI "GROUP";
+  spaces;
+  _ <- stringI "BY";
+  spaces;
+  commaSep1 haskell parseColumnQualified;
+
+
+parseHavingSuffix :: Parser (LogicTree (CompOrder (AggregateFunction ColumnQualified) SomeScalar))
+parseHavingSuffix = do
+  _ <- stringI "HAVING";
+  spaces;
+  parseLogicTree $ parseCompOrder (parseAggregateFun parseColumnQualified) parseSomeScalar
+
+
+-- parses a query with one tablename/table in it, therefore no col aliases needed.
 parseSimpleQuery :: Parser ParsedQueryTree
 parseSimpleQuery =
   do
     _ <- stringI "SELECT"
     spaces;
-    selectClause <- parseSelect
+    selectMap <- parseSelect
     spaces;
     _ <- stringI "FROM"
     spaces;
@@ -509,11 +646,19 @@ parseSimpleQuery =
     _ <- stringI "WHERE"
     spaces;
     whereClause <- parseWhereClause1 parseColumnName;
-    let tableName = getTableAlias fromTable in
-      return $ PQT (toSelectClause tableName selectClause)
-                   (toFromClause fromTable)
-                   (toWhereClause tableName whereClause)
+
+    return $ build selectMap fromTable whereClause
   where
+    build selectMap fromTable whereClause =
+      PQT (toSelectClause tableName selectMap)
+          (toFromClause fromTable)
+          (toWhereClause tableName whereClause)
+          Nothing
+      where
+        -- (SMSlice caToCq caToAgg) = splitSelectMap selectMap
+        -- selectClause = caToCq
+        tableName = getTableAlias fromTable
+
     -- alias is either table name or "$" when subquery.
     getTableAlias :: Either ParsedQueryTree TableName -> TableAlias
     getTableAlias (Left _) = TA "$"
@@ -525,15 +670,17 @@ parseSimpleQuery =
     toSelectClause :: TableAlias -> [(ColumnAlias, ColumnName)] -> ColumnMap
     toSelectClause t = foldl (\m (a,c) -> M.insert a (CQ t c) m) M.empty
 
+    parseSelect :: Parser [(ColumnAlias, ColumnName)]
+    parseSelect = commaSep1 haskell part
+
+
+
     toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
     toWhereClause t = fmap $ mapComp1 $ fmap $ CQ t
 
     parseFrom :: Parser (Either ParsedQueryTree TableName)
     parseFrom = try  (Right <$> parseTableName)
                 <|>  (Left <$> parens haskell parseQuery)
-
-    parseSelect :: Parser [(ColumnAlias, ColumnName)]
-    parseSelect = commaSep1 haskell part
 
     part :: Parser (ColumnAlias, ColumnName)
     part = try parseWithAlias <|> parseWithoutAlias
@@ -707,6 +854,18 @@ prepareWhereClause tree = case orderCnfMaybe of
     convertBack = mapPosCnfLiterals (mapComp Read someScalarMathExpr)
 
 
+--tryInsertAlias :: ColumnName -> ResultQueryTree -> ResultQueryTree
+--tryInsertAlias k@(CN cn) (NestedRQT colMap b c) = NestedRQT newColMap b c
+--  where newColMap = undefined
+
+--findMaybeFirst :: (a -> Maybe b) -> [a] -> Maybe b
+--findMaybeFirst f xs = msum $ map f xs
+
+--lookupAlias :: ColumnName -> ResultQueryTree -> Maybe ColumnAlias
+--lookupAlias cn (NestedRQT cols _ _) = msum $ map (\(k, v) -> if v == cn then Just k else Nothing) $ M.assocs cols
+
+
+
 mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
 mapAssoc2 k1 k2 v m = case M.lookup k1 m of
   Nothing -> M.insert k1 (M.insert k2 v M.empty) m
@@ -720,24 +879,51 @@ instance PrClj ProcessError where
   pr (PE s) = "{:error " ++ show s ++"}"
 
 
+-- addAliasFor :: TableName ResultQueryTree
+
 -- parse and move names, aliases, expressions to right layer.
 processTree :: ParsedQueryTree -> Either ProcessError ResultQueryTree
 
 -- an unknown table alias is used in the WHERE clause
-processTree (PQT _ tableMap whereClause)
+processTree (PQT columnMap tableMap whereClause _)
   | (Just (TA tAlias)) <- msum $ f <$> collectCQ whereClause
   = Left $ PE $ "Unexpected table name in WHERE clause: " ++ tAlias
-  where f (CQ t _) = if not $ M.member t tableMap then Just t else Nothing
-
--- an unknown table alias is used in SELECT clause
-processTree (PQT columnMap tableMap _)
   | (Just (TA tAlias)) <- msum $ f <$> M.elems columnMap
   = Left $ PE $ "Unecpected table name in SELECT clause: " ++ tAlias
   where f (CQ t _) = if not $ M.member t tableMap then Just t else Nothing
 
-processTree (PQT columnMap tableMap whereClause)
+-- TODO: add check for when GROUP BY is found without aggregate fn in SELECT
+-- TODO: add check for GROUP BY clause too.
+-- TODO: enable this for total error handling!!!
+-- an unknown table alias is used in SELECT clause
+-- processTree (PQT _ tableMap _ (GroupBy m _ _ ))
+-- processTree (PQT _ tableMap _ (GroupBy _ cols _ ))
+-- processTree (PQT _ tableMap _ (GroupBy _ _ (Just tree)))
+
+processTree x@(PQT _ _ _ Nothing) = processTreeCore x
+
+-- TODO: Having not supported
+processTree x@(PQT _ _ _ (Just (GroupBy ca2af cqs Nothing))) =
+  case processTreeCore x of
+    err@(Left _) -> err
+    (Right child@(SimpleRQT colMap _ _)) -> Right $ GroupRQT ca2afa child cols
+      where
+        ca2afa = M.map (fmap (\(CQ _ (CN t)) -> (CA t))) ca2af
+        cols  = fmap (\(CQ _ (CN a)) -> reverseLookupWithDefault (CN a) (CA a) colMap) cqs
+    _ -> Left $ PE "Not impled"
+    -- need to modify all possible subselect to embed specia col names!!
+
+processTree _ = Left $ PE "HAVING is not implemented! " -- HAVING not implemented
+
+reverseLookupWithDefault :: (Eq v) => v -> k -> M.Map k v -> k
+reverseLookupWithDefault v k m = head $ [a | (a, b) <- M.assocs m , b == v ] ++ [k]
+
+-- discards group by (will be added later).
+processTreeCore :: ParsedQueryTree -> Either ProcessError ResultQueryTree
+processTreeCore (PQT columnMap tableMap whereClause _)
   --- => SELECT ... FROM tname WHERE ...
   | [(tAlias, Right tName)] <- M.assocs tableMap,
+    -- Nothing <- groupByClause,
     (Just cnf)              <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = case whereJoin of
       Nothing           -> Right $ SimpleRQT cMap tName cnf
@@ -753,6 +939,9 @@ processTree (PQT columnMap tableMap whereClause)
           parentTableMap = M.insert tAlias child M.empty
           parentJoin     =  joinClause -- maybe rework it?
 
+
+
+
   --- => SELECT ... FROM (SELECT ...) WHERE ...
   {-
   | [(tAlias, Left parsedSubtree)] <- M.assocs tableMap, (Just _) <- M.lookup tAlias whereMap, Nothing <- whereJoin
@@ -761,17 +950,20 @@ processTree (PQT columnMap tableMap whereClause)
       Right (SimpleRQT _ _ _) -> Left $ PE "Not impl: only one simple?"
       Right (NestedRQT _ _ _) -> Left $ PE "Not impl: made one?"
   -}
+  {-
   | [(tAlias, Right (TN tName))] <- M.assocs tableMap,
     Nothing <- M.lookup tAlias whereMap -- maybe alias for full table name too.
   = Left $ PE $ "No WHERE conditions for table name: " ++ tName
-  | Nothing <- whereJoin
+  | Nothing <- whereJoin,
+    M.size tableMap > 1
   = Left $ PE "Missing JOIN conditions!"
   | (Left b) <- subTables
   = Left b   -- when error while crating subtable.
+  -}
   -- general case:
   --- => SELECT t1, ... FROM ... WHERE ...
   | (Right tts)           <- subTables,
-    (Just joinConditions) <- whereJoin
+    (Just joinConditions) <- whereJoin -- ,    Nothing <- groupByClause
     -- here: filter aliases from select and condition and replace them with aliases from subtables.
   = let columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map getCompSides $ collectPosCnfLiterals joinConditions
         columnsForTab :: TableAlias -> [ColumnName]
@@ -788,10 +980,12 @@ processTree (PQT columnMap tableMap whereClause)
         --      newColMap = foldl (\aa (CN x) -> M.insert (CA x) (CN x) aa) colMap columns
         -- we add column aliases from joinConditions to subqueries (when missing).
         ttsWithJoinAliases = M.mapWithKey ff tts
+
     in Right $ NestedRQT columnMap ttsWithJoinAliases joinConditions
-  -- where newColumnMap = columnMap
   | otherwise = Left $ PE "Unexpected case"
   where
+
+    -- split select map types  SMSlice caToCQ caToAgg = splitSelectMap columnMap
 
     subTables :: Either ProcessError (M.Map TableAlias ResultQueryTree)
     subTables = M.traverseWithKey makeSubTable tableMap
@@ -804,12 +998,13 @@ processTree (PQT columnMap tableMap whereClause)
         (Just cnf) ->
           case processTree pqt of
             (Left a) -> Left a -- error is propagated
-            (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause)
+            (Right (GroupRQT a b c)) -> Right $ GroupRQT a b c -- TODO: what is it for??
+            (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause) -- TODO group by
               where
                 cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
                 aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
+                -- TODO: handle other cases too.
                 asSimple = M.fromList $ map (\ (CA _, CQ ta (CN cn)) -> (CA cn, CQ ta (CN cn))) $ M.assocs as
-                -- TODO: maybe map back col aliases in cnf to col names (using `as`)
                 mergedWhereClause = conjunction cnf2
                                       (mapPosCnfLiterals
                                         (mapComp (Read . aliasToQualified)
@@ -825,9 +1020,7 @@ processTree (PQT columnMap tableMap whereClause)
                 -- we map back column aliases in the SELECT clause.
                 asSimple = M.fromList $ map (\ (CA _, CN cn) -> (nameToAlias (CN cn), CN cn)) $ M.assocs as
                 nameToAlias :: ColumnName -> ColumnAlias
-                nameToAlias (CN cn) = case find (\(_, CN v) -> v == cn) (M.assocs as) of
-                                        Nothing -> CA cn
-                                        Just (k, _) -> k
+                nameToAlias (CN cn) = reverseLookupWithDefault (CN cn) (CA cn) as
     makeSubTable sTabAlias (Right subTableName)
       |        (Just cnf) <- M.lookup sTabAlias whereMap,
         (Just colAliases) <- M.lookup sTabAlias subTableColAliases,
@@ -840,7 +1033,6 @@ processTree (PQT columnMap tableMap whereClause)
     (whereJoin, whereMap) = prepareWhereClause whereClause
     subTableColAliases = M.foldlWithKey (\m ca (CQ ta cn) -> mapAssoc2 ta ca cn m)
                            M.empty columnMap
-
 
 -- tries to merge two FromClause maps, return Nothing when keys overlap.
 mergeFromClauses :: ParsedFromClause -> ParsedFromClause -> Maybe ParsedFromClause
@@ -936,19 +1128,19 @@ expandEquivalences equivs cnf = newCnf
     allTheSame (x:xs) = all (== x) xs
 
 
-handleLine :: String -> IO ()
+handleLine :: String -> String
 handleLine line =
   case runParser parseQuery () "" line of
-    (Left pe) -> putStrLn $ pr pe
+    (Left pe) -> pr pe
     (Right b) -> case processTree b of
-                   (Left err) -> putStrLn $ pr err
-                   (Right tree) -> putStrLn $ pr tree
+                   (Left err) -> pr err
+                   (Right tree) -> pr tree
 
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering;
   c <- getContents;
-  forM_ (lines c) handleLine
+  forM_ (lines c) (putStrLn . handleLine)
 
 -- == types required: integer, double, string, date
 -- TODO: Date support.

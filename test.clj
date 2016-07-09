@@ -113,7 +113,8 @@
    :from {facebook
           {:select {likes likes, a a, b b},
            :from facebook, :where (cnf [(== id 1)])}},
-   :where (cnf [(== facebook/a facebook/b)])})
+   :where (cnf [(== facebook/a facebook/b)])
+   })
 
 
 (testing "Simply JOIN two tables with one column alias"
@@ -121,7 +122,8 @@
   {:select {t1a_alias t1/a, t2.b t2/b}
    :from {t1 {:select {a a}, :from t1, :where (cnf [(== x 1)])},
           t2 {:select {b b}, :from t2, :where (cnf [(== y 2)])}},
-   :where (cnf [(== t1/a t2/b)])})
+   :where (cnf [(== t1/a t2/b)])
+   })
 
 
 (testing "Simply JOIN two tables on key NOT IN selection of subquery."
@@ -130,7 +132,8 @@
   {:select {t1.a t1/a, t2.b t2/b}
    :from {t1 {:select {a a, x x} :from t1 :where (cnf [(== f 1)])}
           t2 {:select {b b, y y} :from t2 :where (cnf [(== g 2)])}}
-   :where (cnf [(== t1/x t2/y)])})
+   :where (cnf [(== t1/x t2/y)])
+   })
 
 
 (testing "Single subquery"
@@ -139,7 +142,8 @@
    :from {t {:select {x xx, y yy},
              :from webpage,
              :where (cnf [(== id 1)])}},
-   :where (cnf [(== t/x t/y)])})
+   :where (cnf [(== t/x t/y)])
+   })
 
 
 (testing "Single subquery with filter inside"
@@ -148,8 +152,10 @@
   {:select {t.y t/y},
    :from {t {:select {x webpage/x, y webpage/y},
              :from {webpage {:select {x xx, y yy, aa aa, bb bb}, :from webpage, :where (cnf [(== id 1)])}},
-             :where (cnf [(== webpage/aa webpage/bb)])}},
-   :where (cnf [(== t/x t/y)])})
+             :where (cnf [(== webpage/aa webpage/bb)])
+             }},
+   :where (cnf [(== t/x t/y)])
+   })
 
 
 ;; FEATURE: all kinds of relations
@@ -157,7 +163,8 @@
   "SELECT id FROM t WHERE a==1 and b<=2 and c>=3 and d<4 and e>5 and f!=6 and g<>7 and h BETWEEN 8 and 9"
   {:select {id id}, :from t,
    :where
-   (cnf [(< d 4)] [(> e 5)] [(== a 1)] [(>= c 3)] [(>= h 8)] [(<= b 2)] [(<= h 9)] [(!= f 6)] [(!= g 7)])})
+   (cnf [(< d 4)] [(> e 5)] [(== a 1)] [(>= c 3)] [(>= h 8)] [(<= b 2)] [(<= h 9)] [(!= f 6)] [(!= g 7)])
+   })
 
 
 ;; FEATURE: conditions propagate over equivalences to submaps.
@@ -170,7 +177,8 @@
           t2 {:select {weekDay weekDay, id id},
               :from t2,
               :where (cnf [(>= weekDay 1)] [(<= weekDay 7)])}},
-   :where (cnf [(== t1/day t2/weekDay)])})
+   :where (cnf [(== t1/day t2/weekDay)])
+   })
 
 
 (testing "Simple scalar expression evaluation"
@@ -185,7 +193,8 @@
   {:select {x.id x/id, y.id y/id},
    :from {x {:select {id id}, :from t, :where (cnf [(> id 1)])},
           y {:select {id id}, :from t, :where (cnf [(> id 10)])}},
-   :where (cnf [(== x/id y/id)])})
+   :where (cnf [(== x/id y/id)])
+   })
 
 
 (testing "Two subquery as select expressions w alias"
@@ -193,7 +202,8 @@
   {:select {x.xid x/xid, y.yid y/yid},
    :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)])},
           y {:select {yid id}, :from t, :where (cnf [(> id 10)])}},
-   :where (cnf [(== x/xid y/yid)])})
+   :where (cnf [(== x/xid y/yid)])
+   })
 
 
 (testing "Two subquery - one table name, one subexpr"
@@ -201,7 +211,8 @@
   {:select {x.xid x/xid, y.yid y/yid},
    :from {x {:select {xid id}, :from t, :where (cnf [(> id 1)] [(> id 12)])},
           y {:select {yid yid}, :from y, :where (cnf [(> yid 12)])}},
-   :where (cnf [(== x/xid y/yid)])})
+   :where (cnf [(== x/xid y/yid)])
+   })
 
 
 (testing "One nested select without join expression"
@@ -225,14 +236,16 @@
    :from {$ {:select {id id, key key}
              :from t
              :where (cnf [(> day 2)])}}
-   :where (cnf [(== $/id $/key)])})
+   :where (cnf [(== $/id $/key)])
+   })
 
 
 (testing "One nested select with outside only join expr"
   "SELECT p.id FROM (SELECT id, key FROM t where day>2) AS p WHERE p.id==p.key"
   {:select {p.id p/id}
    :from {p {:select {id id, key key} :from t :where (cnf [(> day 2)])}}
-   :where (cnf [(== p/id p/key)])})
+   :where (cnf [(== p/id p/key)])
+   })
 
 
 (testing "One nested select with join expression and filter on outside"
@@ -242,7 +255,8 @@
    {$ {:select {id id, key key},
        :from t,
        :where (cnf [(> day 2)] [(> id 5)] [(> key 5)])}},
-   :where (cnf [(== $/id $/key)])}  )
+   :where (cnf [(== $/id $/key)])
+   })
 
 (testing "One nested select with join expression and filter on outside"
   "SELECT id FROM (SELECT id, key, aa FROM t where day>2) WHERE aa>5 and id==key"
@@ -250,7 +264,8 @@
    :from {$ {:select {aa aa, id id, key key},
              :from t,
              :where (cnf [(> aa 5)] [(> day 2)])}},
-   :where (cnf [(== $/id $/key)])} )
+   :where (cnf [(== $/id $/key)])
+   })
 
 (testing "Like prev but with table alias."
   "SELECT t.id FROM (SELECT id, key, aa FROM t where day>2) AS t WHERE t.aa>5 and t.id==t.key"
@@ -258,20 +273,42 @@
    :from {t {:select {aa aa, id id, key key},
              :from t,
              :where (cnf [(> aa 5)] [(> day 2)])}},
-   :where (cnf [(== t/id t/key)])})
+   :where (cnf [(== t/id t/key)])
+   })
 
+#_
 (testing "Nested deep"
   "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2) WHERE id>3"
   nil)
 
+#_
 (testing "Nested deep"
   "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1 and c==d) WHERE a>2) WHERE id>3"
   nil)
 
+#_
 (testing "Nested deep moves join guard outside, filters inside."
   "SELECT id FROM (SELECT a, id FROM (SELECT a, id FROM t WHERE b==1) WHERE a>2 and a<id) WHERE id>3"
   {:select {id $/id}
    :from {$ {:select {id id}
              :from t
              :where (cnf [(> a 2)] [(== b 1)] [(> id 3)])}}
-   :where (cnf [(< $/a $/id)])})
+   :where (cnf [(< $/a $/id)])
+   })
+
+
+(testing "Simple unnamed GROUP by"
+  "SELECT Max(visitors) AS max_vis, city FROM table WHERE date Between 1 and 2 GROUP BY city)"
+  {:select {max_vis (max visitors)},
+   :from {:select {city city, visitors visitors},
+          :from table,
+          :where (cnf [(>= date 1)] [(<= date 2)])},
+   :group-by [city]})
+
+(testing "Simple named GROUP by"
+  "SELECT Max(t.visitors) AS max_vis, t.city FROM table AS t WHERE t.date Between 1 and 2 GROUP BY t.city)"
+  {:select {max_vis (max visitors)},
+   :from {:select {t.city city, visitors visitors},
+          :from table,
+          :where (cnf [(>= date 1)] [(<= date 2)])},
+   :group-by [t.city]})
