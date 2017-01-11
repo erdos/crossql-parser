@@ -10,9 +10,9 @@ module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, tree
 
 import Util
 
-import Control.Applicative ((<$>))
-import Data.Foldable (Foldable, foldMap)
-import Data.Monoid (mappend)
+--import Control.Applicative ((<$>))
+--import Data.Foldable (Foldable, foldMap)
+--import Data.Monoid (mappend)
 
 import Text.Parsec as TP ((<|>), chainl1, spaces)
 import Text.Parsec.Language
@@ -121,26 +121,6 @@ conjunctionNaive (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
 -- szerint n*log(n) + m*log(m) idoben es m+n idoben megcsinalhatjuk az osszefesulest (* az ellenorzes ha false pos van, ami remelhetoleg ritka)
 conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
 conjunction = conjunctionNaive
-
--- conjunction (PosClause cs1) (PosClauses cs2) = PosClauses $ undefined
---  where
---    cs11 = undefined -- sorted map of (smallest,largest) -> clauses
---    cs22 = undefined --
-    -- then: walk both maps
-    -- when not= -> insert the smallest and proceed
-    -- when = and submap -> insert the smallest disj.
-    -- when = and not submap -> needs square algo.
-    -- when ran out of one -> insert the rest.
-
-{-
--- like `fmap` for PosCNF
-mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
-mapPosCnfLiterals f (PosClauses cs) =
-  PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
-
--- cnfAddClause :: (Ord a) => PosClause a -> PosCNF a -> PosCNF a
--- cnfAddClause x (PosClauses cs) = PosClauses (S.insert x cs)
--}
 
 treeToPosCnf :: (Ord a, Negateable a) => LogicTree a -> PosCNF a
 treeToPosCnf = toPosCnf . toCnf
