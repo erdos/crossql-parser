@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts#-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -12,10 +13,10 @@ module MathExpr (collect, AggregateFn, MathExpr(Sca, Read), SomeScalar(DD, II, S
 
 import Util
 
-import Control.Applicative ((<$>))
+-- import Control.Applicative ((<$>))
 
-import Data.Foldable (Foldable, foldMap)
-import Data.Monoid (mempty, mappend)
+-- import Data.Foldable (Foldable, foldMap)
+-- import Data.Monoid (mempty, mappend)
 
 import Text.Parsec as TP ((<|>), chainl1, string, spaces, try)
 import Text.Parsec.Language
