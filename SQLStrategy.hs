@@ -14,7 +14,7 @@ module SQLStrategy (TopQuery, RawQuery(RawQuery), JoinedQuery(EquiJoin), transfo
 
 
 import Data.Foldable (toList)
-import Data.List (group)
+import Data.List (group, nub)
 import Data.Map.Strict as Map (Map, empty, alter)
 import Data.Maybe
 
@@ -146,22 +146,48 @@ simplifySelectClause ((colMath, mColAlias): xs) = (xa:as, bs) where
 transformer :: QuerySpec -> TopQuery
 
 transformer (SFW selectClause ((Left tableName, maybeTableAlias), []) whereClause)
-  = TQ Nothing undefined source
+  = transformQuery
   where
-    (scCmCa, scCnCa) = simplifySelectClause selectClause
+
+    -- a nyers szelekciokba bele kene tenni a kihalaszott read-eket is.
+    rawQuery = RawQuery allColumnNamesUnqualified tableName cleanCnfWhereClause
+    -- itt tortenik a mapeles (AS alias es) a bonyolultabb WHERE
+    transformQuery = undefined rawQuery
+
+    -- ebben benne lesz minden szelekcio minden atnevezessel egyutt.
+    allColumnNames = (map snd scColToAlias) -- colAlias -> colNames in SELECT
+                     ++ (concatMap (findReads . snd) scMathToAlias) -- colAlias -> mathExpressions in SELECt
+                     ++ (findReads cleanCnfWhereClause) -- all col names in clean WHERE
+                     ++ (findReads mixedCnfWhereClause) -- all col names in mixed WHERE
+    allColumnNamesUnqualified = nub allColumnNames
+
+    -- TODO: csinalni hozza egy kontenert, amiben benne vannak a szelekciok es a
+
+    (scMathToAlias, scColToAlias) = simplifySelectClause selectClause
     tableAlias = fromMaybe tableName maybeTableAlias
-    (filterA, filterB) = orderCnf' whereClause
+    (cleanCnfWhereClause, mixedCnfWhereClause) = orderCnf' whereClause
     -- ha filterA ures -> es scCmCa is ures -> csak egy rawQuery
 
     source =  Left $ RawQuery undefined tableName undefined
     -- cnf = CNF.treeToPosCnf w
 
-transformer (SFW _ _ _) = undefined
+transformer (SFW selectClause ((Right nestedQuery, maybeTableAlias), []) whereClause)
+  = transformQuery
+  where
+    insideQuery = transformer nestedQuery
+    -- TODO: create a transformer wrappper query. also: parse nested
+    transformQuery = undefined insideQuery
+
+-- TODO: filter select, where clauses. eval with head item then with tail and merge them.
+transformer (SFW selectClause (h, xs) whereClause)
+  = transformQuery
+  where
+    transformQuery = undefined
 
 -- ezeket raer kesobb implementalni.
 
-transformer (SFWG _ _ _ _) = undefined "Not yet supported"
-transformer (SFWGH _ _ _ _ _) = undefined "Not yet supported"
+transformer (SFWG _ _ _ _) = undefined -- TODO: impl this
+transformer (SFWGH _ _ _ _ _) = undefined -- TODO: impl this
 
 -- TODO: remove this. we use this fn to export wip unused definitions
 collector :: a

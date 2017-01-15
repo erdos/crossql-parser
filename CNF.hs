@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses) where
+module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, CNF.null) where
 -- cnf: literal diszjunkciok konjukcioja
 
 import Util
@@ -21,7 +21,7 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import qualified Data.Set as S
-  (Set, union, empty, insert, elems, fromList, map)
+  (Set, union, empty, insert, elems, fromList, map, null)
 -- import qualified Data.Map.Strict as M
 --   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
   --  mapWithKey, traverseWithKey, member, alter, intersection, union, null, elems)
@@ -134,6 +134,9 @@ fromClauses xs = PosClauses $ S.fromList [PosC $ S.fromList ys | ys <- xs]
 
 empty :: (Ord a) => PosCNF a
 empty = PosClauses $ S.fromList []
+
+null :: (Ord a) => PosCNF a -> Bool
+null (PosClauses xs) = S.null xs
 
 insertClause :: (Ord a) => [a] -> PosCNF a -> PosCNF a
 insertClause x (PosClauses cs) = PosClauses $ S.insert (PosC (S.fromList x)) cs
