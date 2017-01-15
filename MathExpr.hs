@@ -9,7 +9,7 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn, MathExpr(Sca, Read), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn) where
+module MathExpr (collect, AggregateFn, MathExpr(Sca, Read), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar) where
 
 import Util
 
@@ -89,10 +89,6 @@ instance (PrClj t) => PrClj (MathExpr t) where
 collect :: MathExpr a -> [a]
 collect = foldMap (:[])
 
--- toScalar :: MathExpr a -> Maybe (MathExpr a)
--- toScalar = undefined
-
-
 -- TODO: also fncalls.
 parseMathExpr :: Parser a -> Parser (MathExpr a)
 parseMathExpr f = _start
@@ -112,3 +108,7 @@ parseMathExpr f = _start
 
 parse :: Parser (MathExpr SomeScalar)
 parse = parseMathExpr parseSomeScalar
+
+mathMaybeScalar :: MathExpr a -> Maybe SomeScalar
+mathMaybeScalar (Sca s) = Just s
+mathMaybeScalar _ = Nothing

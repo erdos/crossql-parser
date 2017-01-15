@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause) where
+module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses) where
 -- cnf: literal diszjunkciok konjukcioja
 
 import Util
@@ -14,6 +14,7 @@ import Util
 --import Data.Foldable (Foldable, foldMap)
 --import Data.Monoid (mappend)
 
+import Data.List (partition)
 import Text.Parsec as TP ((<|>), chainl1, spaces)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
@@ -98,7 +99,7 @@ newtype PosCNF a = PosClauses (S.Set (PosClause a))
 
 toPosCnf :: (Ord a, Negateable a) => CNF a -> PosCNF a
 toPosCnf (Clauses cs) = PosClauses $ S.map f cs
-  where f (PosNeg gg hh) = PosC $ S.union gg $ S.map Util.negate hh
+  where f (PosNeg gg hh) = PosC $ S.union gg $ S.map Util.negative hh
 
 
 instance (PrClj a) =>  PrClj (PosCNF a) where
@@ -136,3 +137,11 @@ empty = PosClauses $ S.fromList []
 
 insertClause :: (Ord a) => [a] -> PosCNF a -> PosCNF a
 insertClause x (PosClauses cs) = PosClauses $ S.insert (PosC (S.fromList x)) cs
+
+splitClauses :: (Ord a) => ([a] -> Bool) -> PosCNF a -> (PosCNF a, PosCNF a)
+splitClauses f cnf = (fromClauses xs, fromClauses ys) where
+  (xs, ys) = partition f (clauses cnf)
+
+map2Clauses :: (Ord a, Ord b, Ord c) => ([a] -> Either [b] [c]) -> PosCNF a -> (PosCNF b, PosCNF c)
+map2Clauses f cnf = (fromClauses xs, fromClauses ys) where
+  (xs, ys) = splitEither f $ clauses cnf

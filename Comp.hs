@@ -8,7 +8,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, Comp.negate, sides, mapSides, mapSides1, parse, parse1, elems) where
+module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, sides, mapSides, mapSides1, parse, parse1, elems, rightSide, leftSide) where
 
 import Text.Parsec as TP
   ((<|>), string, spaces, try)
@@ -17,7 +17,7 @@ import Text.Parsec as TP
 --import Text.Parsec.Language
 import Text.Parsec.String as TPS (Parser)
 --import Text.Parsec.Token as TPT
-import Util (PrClj, pr)
+import Util (PrClj, pr, Negateable(negative))
 
 
 data CompOrder a b = CST a b
@@ -47,6 +47,12 @@ sides (CST p q) = (p,q)
 sides (CLT p q) = (p,q)
 sides (CLEQ p q) = (p,q)
 sides (CSEQ p q) = (p,q)
+
+leftSide :: CompOrder a b -> a
+leftSide = fst . sides
+
+rightSide :: CompOrder a b -> b
+rightSide = snd . sides
 
 mapSides :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
 mapSides f g (CEQ x y) = CEQ (f x) (g y)
@@ -90,11 +96,11 @@ flip x = case x of
   (CSEQ a b) -> CLEQ b a
   (CLEQ a b) -> CSEQ b a
 
-negate :: CompOrder a b -> CompOrder a b
-negate x = case x of
-  (CST a b) -> CLEQ a b
-  (CLEQ a b) -> CST a b
-  (CEQ a b) -> CNEQ a b
-  (CNEQ a b) -> CEQ a b
-  (CSEQ a b) -> CLT a b
-  (CLT a b) -> CSEQ a b
+instance Negateable (CompOrder a b) where
+  negative x = case x of
+    (CST a b) -> CLEQ a b
+    (CLEQ a b) -> CST a b
+    (CEQ a b) -> CNEQ a b
+    (CNEQ a b) -> CEQ a b
+    (CSEQ a b) -> CLT a b
+    (CLT a b) -> CSEQ a b

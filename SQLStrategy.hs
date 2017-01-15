@@ -8,16 +8,15 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 module SQLStrategy (TopQuery, RawQuery(RawQuery), JoinedQuery(EquiJoin), transformer,
-
-                    splitCNF, maybeOrder, orderCNF
-
+                     splitCNF, maybeOrder, orderCNF,
+                     collector
                    ) where
 
 
 import Data.Foldable (toList)
 import Data.List (group)
 import Data.Map.Strict as Map (Map, empty, alter)
-
+import Data.Maybe
 
 import SQLParser
 import CNF
@@ -56,19 +55,18 @@ data TopQuery = TQ -- root
                 (Maybe TransformStep)
                 (Either RawQuery JoinedQuery)
 
+-- TODO: implement this
 instance PrClj TopQuery where
-  pr = undefined
+  pr (TQ as ts _) = "TOP_QUERY"
+                      ++ maybe "nil" (\_ -> "as") as
+                      ++ maybe "nil" (\_ -> "ts") ts
+                      ++ "END"
 
 -- legbelulre mozgatjuk a folosleges felteteleket.
+-- azokat, amik nem hasznalnak ezen a szinten levo oszlopneveket
+-- TODO: implement this
 moveConditionsInwards :: TopQuery -> TopQuery
-moveConditionsInwards = undefined
-
---transformS :: SQLParser.SelectClause -> a
--- transformS = undefined
-
--- instance Negateable (CompOrder a b) where
---  negate = Comp.negate
-
+moveConditionsInwards x = x
 
 type CNFCME a = PosCNF (Comp (MathExpr a))
 
@@ -77,6 +75,7 @@ compReads c = toList (fst $ Comp.sides c) ++ toList (snd $ Comp.sides c)
 
 
 -- kivalogatjuk azokat az agakat, ahol egy tablahoz tartozo cellak vannak
+-- f: column name to table name fn.
 splitCNF :: (Eq a, Ord a, Ord b, Eq b) =>
             (a -> b) -> CNFCME a -> (CNFCME a, Map b (CNFCME a))
 splitCNF f cnf = foldr fff (CNF.empty, Map.empty) (CNF.clauses cnf)
@@ -99,6 +98,7 @@ maybeOrder cmp = case Comp.sides cmp of
 
 -- megprobaljuk kettevagni a fat ugy, hogy a levalasztott ag teljesen
 -- balra legyen rendezve.
+-- TODO: ez most folosleges, mert a WhereClause amugy is balra van rendezve.
 orderCNF :: (Ord a) => CNFCME a -> (CNFCME a, PosCNF (CompOrder a SomeScalar))
 orderCNF cnf = (CNF.fromClauses os, CNF.fromClauses es)
   where
@@ -107,17 +107,62 @@ orderCNF cnf = (CNF.fromClauses os, CNF.fromClauses es)
       Just t -> (a, t:b)
       Nothing -> (x:a, b)
 
+
+-- WC: LogicTree (CompOrder ColName (ME ColName))
+-- kivalogatja azokat a feltetelek, amelyek teljesen balra rendehetoek.
+orderCnf' :: WhereClause -> (PosCNF (CompOrder ColumnName SomeScalar), PosCNF (CompOrder ColumnName (MathExpr ColumnName)))
+orderCnf' ltree = map2Clauses f cnf where
+  cnf :: PosCNF (CompOrder ColumnName (MathExpr ColumnName))
+  cnf = treeToPosCnf ltree
+
+  f :: [CompOrder ColumnName (MathExpr ColumnName)] -> Either [CompOrder ColumnName SomeScalar] [CompOrder ColumnName (MathExpr ColumnName)]
+  f comparisons = case maybeAll (map (mathMaybeScalar . rightSide) comparisons) of
+    Nothing -> Right comparisons
+    Just scalars -> Left $ zipWith (\s -> \c -> mapSides id (const s) c) scalars comparisons
+
+-- megprobalja levalasztani a kifejezesekbol a bonyolult matematikai kifejezeseket.
+simplifySelectClause :: SelectClause -> ([(ColumnMath, ColumnAlias)], [(ColumnName, ColumnAlias)])
+simplifySelectClause [] = ([],[])
+simplifySelectClause ((Read a, mColAlias): xs) = (as, xb:bs) where
+  xb = (a, fromMaybe a mColAlias)
+  (as, bs) = simplifySelectClause xs
+simplifySelectClause ((colMath, mColAlias): xs) = (xa:as, bs) where
+  xa = (colMath, fromMaybe "??" mColAlias)   -- TODO: replace ?? with toString of colMath
+  (as,bs) = simplifySelectClause xs
+
+
+-- WC: Logictree (CompOrder ColNam (ME ColName))
+--whereClauseTo :: WhereClause ->
+
+--splitLeftAlignedCNF :: (PosCNF ColumnName (MathExpr ColumnName)) -> (TableName -> )
+
+-- transformWhereClause :: WhereClause ->
+-- SelectCLause: [(ColumnMath, Maybe ColumnAlias)]
+-- FromCLause: (TableReference, [(TableReference), Maybe JoinCond])
+--                   -> ((Either TableName SubQuery), Maybe TableAlias)
+-- WhereClause: LogicTree (CompOrder CN (MathExpr CN))
 -- simple easy query is being transformed.
 -- meg a megfelelo helyre kell mozgatni a felteteleket.
 transformer :: QuerySpec -> TopQuery
-transformer (SFW _ ((Left tableName, _), []) _)
-  = TQ Nothing ts source
+
+transformer (SFW selectClause ((Left tableName, maybeTableAlias), []) whereClause)
+  = TQ Nothing undefined source
   where
-    ts = undefined -- splitCNF undefined maybeOrder undefined orderCNF undefined
-    --;;                        colName   tabName   cnf
+    (scCmCa, scCnCa) = simplifySelectClause selectClause
+    tableAlias = fromMaybe tableName maybeTableAlias
+    (filterA, filterB) = orderCnf' whereClause
+    -- ha filterA ures -> es scCmCa is ures -> csak egy rawQuery
+
     source =  Left $ RawQuery undefined tableName undefined
     -- cnf = CNF.treeToPosCnf w
 
-transformer _ = undefined TQ TS AS moveConditionsInwards
+transformer (SFW _ _ _) = undefined
 
--- todo: write validators too
+-- ezeket raer kesobb implementalni.
+
+transformer (SFWG _ _ _ _) = undefined "Not yet supported"
+transformer (SFWGH _ _ _ _ _) = undefined "Not yet supported"
+
+-- TODO: remove this. we use this fn to export wip unused definitions
+collector :: a
+collector = undefined moveConditionsInwards AS TS

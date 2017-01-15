@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable, Util.negate, stringI, parseIdentifier) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -16,7 +16,7 @@ class PrClj a where
   pr :: a -> String
 
 class Negateable a where
-  negate :: a -> a
+  negative :: a -> a
 
 instance (PrClj a) => PrClj [a] where
   pr l = "[" ++ unwords (map pr l) ++ "]"
@@ -58,3 +58,18 @@ parseIdentifier = idBacktick <|> id1
       firstChar <- letter <|> oneOf "_$";
       restChar <- many (alphaNum <|> oneOf "_:$.");
       return $ firstChar : restChar}
+
+splitEither :: (a -> Either b c) -> [a] -> ([b], [c])
+splitEither _ [] = ([],[])
+splitEither f (x:xs) = case (f x) of
+  Left a -> (a:as, bs)
+  Right b -> (as, b:bs)
+  where
+    (as, bs) = splitEither f xs
+
+maybeAll :: [Maybe a] -> Maybe [a]
+maybeAll [] = Just []
+maybeAll (Nothing : _) = Nothing
+maybeAll ((Just a) : xs) = case (maybeAll xs) of
+  Nothing -> Nothing
+  Just bs -> Just (a : bs)
