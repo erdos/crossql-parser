@@ -7,11 +7,9 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SQLStrategy (TopQuery, RawQuery(RawQuery), JoinedQuery(EquiJoin), transformer,
-                     splitCNF, maybeOrder, orderCNF,
-                     collector
+module SQLStrategy (TopQuery, RawQuery(RawQuery), JoinedQuery(EquiJoin),
+                     transformer, splitCNF, maybeOrder, orderCNF, collector
                    ) where
-
 
 import Data.Foldable (toList)
 import Data.List (group, nub)
@@ -52,14 +50,14 @@ data TransformStep
 
 data TopQuery = TQ -- root
                 (Maybe AggregateStep)
-                (Maybe TransformStep)
+                TransformStep
                 (Either RawQuery JoinedQuery)
 
 -- TODO: implement this
 instance PrClj TopQuery where
-  pr (TQ as ts _) = "TOP_QUERY"
+  pr (TQ as _ _) = "TOP_QUERY"
                       ++ maybe "nil" (\_ -> "as") as
-                      ++ maybe "nil" (\_ -> "ts") ts
+                      ++ "TRANSFORM_STEP"
                       ++ "END"
 
 -- legbelulre mozgatjuk a folosleges felteteleket.
@@ -145,44 +143,64 @@ simplifySelectClause ((colMath, mColAlias): xs) = (xa:as, bs) where
 -- meg a megfelelo helyre kell mozgatni a felteteleket.
 transformer :: QuerySpec -> TopQuery
 
-transformer (SFW selectClause ((Left tableName, maybeTableAlias), []) whereClause)
-  = transformQuery
-  where
 
+-- TODO: egyszerusitesi szabalyok:
+--  - transformStep nem kell, ha nincs valodi SELECT es WHERE.
+-- TODO: implni kell mielott tesztelem:
+--  - kezelje a kvalifikalt/aliaszolt oszlopneveket a feltetelekbol
+--  - kezelje az aliaszolt tabla nevet is a klozokban.
+
+
+--                                              _-> maybeTableAlias
+transformer (SFW selectClause ((Left tableName, _), []) whereClause)
+  = TQ Nothing transformStep (Left rawQuery)
+  where
     -- a nyers szelekciokba bele kene tenni a kihalaszott read-eket is.
     rawQuery = RawQuery allColumnNamesUnqualified tableName cleanCnfWhereClause
     -- itt tortenik a mapeles (AS alias es) a bonyolultabb WHERE
-    transformQuery = undefined rawQuery
+    transformStep = TS transformAliases mixedWhereClause
+
+    -- egyszerre tartalmazza a projekciokat es atnevezeseket. (tehat az eredeti SELECT klozt.)
+    transformAliases = [(fromMaybe "??math-expr-wo-alias" mCA, colMath) | (colMath, mCA) <- selectClause]
+
+    -- mindket oldalon mathExpr szerepeljen!
+    mixedWhereClause = mapPredicates (mapSides (\s -> Read s) id) mixedCnfWhereClause
 
     -- ebben benne lesz minden szelekcio minden atnevezessel egyutt.
     allColumnNames = (map snd scColToAlias) -- colAlias -> colNames in SELECT
-                     ++ (concatMap (findReads . snd) scMathToAlias) -- colAlias -> mathExpressions in SELECt
-                     ++ (findReads cleanCnfWhereClause) -- all col names in clean WHERE
-                     ++ (findReads mixedCnfWhereClause) -- all col names in mixed WHERE
+                     -- colAlias -> mathExpressions in SELECt
+                     ++ (concatMap (collect . fst) scMathToAlias)
+                      -- all col names in clean WHERE
+                     ++ (map leftSide $ predicates cleanCnfWhereClause)
+                     -- all col names in mixed WHERE
+                     ++ (concatMap (\x -> (leftSide x) : collect (rightSide x)) $ predicates mixedCnfWhereClause)
     allColumnNamesUnqualified = nub allColumnNames
 
-    -- TODO: csinalni hozza egy kontenert, amiben benne vannak a szelekciok es a
-
     (scMathToAlias, scColToAlias) = simplifySelectClause selectClause
-    tableAlias = fromMaybe tableName maybeTableAlias
+    -- --- --- --- -tableAlias = fromMaybe tableName maybeTableAlias
     (cleanCnfWhereClause, mixedCnfWhereClause) = orderCnf' whereClause
-    -- ha filterA ures -> es scCmCa is ures -> csak egy rawQuery
 
-    source =  Left $ RawQuery undefined tableName undefined
-    -- cnf = CNF.treeToPosCnf w
+
+-- ez az ag bonyolult: ha van group-by kloz -> nem tudom
+-- ha nincs group-by -> akkor a select-where klozokat ossze kell vonni.
 
 transformer (SFW selectClause ((Right nestedQuery, maybeTableAlias), []) whereClause)
-  = transformQuery
-  where
-    insideQuery = transformer nestedQuery
-    -- TODO: create a transformer wrappper query. also: parse nested
-    transformQuery = undefined insideQuery
+  = case (transformer nestedQuery) of
+      TQ Nothing nestedTransform nestedSource ->
+        TQ Nothing mixedTransform nestedSource
+        where
+          -- TODO: merge SELECT+WHERE into transform
+          mixedTransform = undefined nestedTransform selectClause whereClause
+      _ -> undefined -- nem tudjuk h mi tortenik group-by eseten.
+
 
 -- TODO: filter select, where clauses. eval with head item then with tail and merge them.
-transformer (SFW selectClause (h, xs) whereClause)
+transformer (SFW selectClause (currentTableRef, ((tableRef, maybeJoinCond): xs)) whereClause)
   = transformQuery
   where
-    transformQuery = undefined
+    -- selectClause - get all col names from maths.
+
+    transformQuery = undefined selectClause whereClause x xs
 
 -- ezeket raer kesobb implementalni.
 

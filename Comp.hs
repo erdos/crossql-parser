@@ -8,7 +8,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, sides, mapSides, mapSides1, parse, parse1, elems, rightSide, leftSide) where
+module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, sides, mapSides, mapSides1, parse, parse1, elems, elemsList, rightSide, leftSide) where
 
 import Text.Parsec as TP
   ((<|>), string, spaces, try)
@@ -86,6 +86,9 @@ elems (CEQ x y) = (x,y)
 elems (CNEQ x y) = (x,y)
 elems (CSEQ x y) = (x,y)
 elems (CLEQ x y) = (x,y)
+
+elemsList :: CompOrder a a -> [a]
+elemsList a = [x, y] where (x,y) = elems a
 
 flip :: CompOrder a b -> CompOrder b a
 flip x = case x of

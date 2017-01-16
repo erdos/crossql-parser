@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnName, ColumnAlias, ColumnMath, TableName, TableAlias, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause) where
+module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnName, ColumnAlias, ColumnMath, TableName, TableAlias, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery) where
 
 import CNF
 import MathExpr

@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, CNF.null) where
+module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, mapPredicates, CNF.null, predicates) where
 -- cnf: literal diszjunkciok konjukcioja
 
 import Util
@@ -128,6 +128,12 @@ treeToPosCnf = toPosCnf . toCnf
 
 clauses :: PosCNF a -> [[a]]
 clauses (PosClauses x) = [S.elems y | (PosC y) <- S.elems x]
+
+predicates :: PosCNF a -> [a]
+predicates = concat . clauses
+
+mapPredicates :: (Ord a, Ord b) => (a -> b) -> (PosCNF a) -> (PosCNF b)
+mapPredicates f cnf = fromClauses [map f xs | xs <- clauses cnf]
 
 fromClauses :: (Ord a) => [[a]] -> PosCNF a
 fromClauses xs = PosClauses $ S.fromList [PosC $ S.fromList ys | ys <- xs]
