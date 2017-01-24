@@ -36,7 +36,7 @@ import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
-import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
+import CNF(LogicTree(And,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null, unfoldLogicTree)
 import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar, maybeEvalScalar)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
@@ -219,13 +219,6 @@ parseWhereClause1 p = unfoldLogicTree <$> parseLogicTree (try parse_between <|> 
       spaces;
       x2 <- parseMathExpr p;
       return $ And (Leaf (CSEQ x1 colname)) (Leaf (CSEQ colname x2))
-
-unfoldLogicTree :: LogicTree (LogicTree a) -> LogicTree a
-unfoldLogicTree (And a b) = And (unfoldLogicTree a) (unfoldLogicTree b)
-unfoldLogicTree (Or a b) = Or (unfoldLogicTree a) (unfoldLogicTree b)
-unfoldLogicTree (Not a) = Not (unfoldLogicTree a)
-unfoldLogicTree (Leaf x) = x
-
 
 parseWhereClause :: Parser ParsedWhereClause
 parseWhereClause = parseWhereClause1 parseColumnQualified
