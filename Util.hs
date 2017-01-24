@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -61,7 +61,7 @@ parseIdentifier = idBacktick <|> id1
 
 splitEither :: (a -> Either b c) -> [a] -> ([b], [c])
 splitEither _ [] = ([],[])
-splitEither f (x:xs) = case (f x) of
+splitEither f (x:xs) = case f x of
   Left a -> (a:as, bs)
   Right b -> (as, b:bs)
   where
@@ -70,6 +70,15 @@ splitEither f (x:xs) = case (f x) of
 maybeAll :: [Maybe a] -> Maybe [a]
 maybeAll [] = Just []
 maybeAll (Nothing : _) = Nothing
-maybeAll ((Just a) : xs) = case (maybeAll xs) of
+maybeAll (Just a : xs) = case maybeAll xs of
   Nothing -> Nothing
   Just bs -> Just (a : bs)
+
+
+groupMapBy :: (Ord k) => (a -> k) -> [a] -> M.Map k [a]
+groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
+
+-- assert: xs is not empty.
+maybeAllMapToSame :: (Eq k) => (a->k) -> [a] -> Maybe k
+maybeAllMapToSame _ [] = Nothing
+maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Nothing

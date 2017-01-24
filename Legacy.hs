@@ -14,8 +14,6 @@ module Legacy (handleLine) where
 
 import Control.Monad
 
-import Data.Char(toUpper)
-
 import qualified Data.Set as S
   (Set, union, elems, fromList, null, intersection)
 import qualified Data.Map.Strict as M
@@ -29,7 +27,7 @@ import Data.Maybe(listToMaybe, mapMaybe)
 import Control.Applicative ((<$>))
 
 import Text.Parsec as TP
-  ((<?>), (<|>), string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
+  ((<|>), string,runParser, spaces, try)
 import Text.Parsec.Combinator (optionMaybe)
 
 import Text.Parsec.Language
@@ -39,8 +37,8 @@ import Text.Parsec.Token as TPT
 import CNF(LogicTree(And,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null, unfoldLogicTree)
 import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar, maybeEvalScalar)
 
-import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
-import Util(PrClj(pr))
+import Comp
+import Util
 
 -- used in GROUP BY and HAVING clauses
 data SelectExpression = SelectAggregate (AggregateFn ColumnQualified)
@@ -149,26 +147,6 @@ parseTableAlias = TA <$> parseIdentifier
 
 parseTableName :: Parser TableName
 parseTableName = TN <$> parseIdentifier
-
-
--- case insensitive string matching
-stringI :: String -> Parser String
-stringI cs = mapM caseChar cs <?> cs where
-  caseChar c = satisfy (\x -> toUpper x == toUpper c)
-
-parseIdentifier :: Parser String
-parseIdentifier = idBacktick <|> id1
-  where
-    idBacktick = do {
-      _ <- char '`';
-      s <- many1 $ noneOf "`" ; -- satisfy (/= '`');
-      _ <- char '`';
-      return s}
-    id1 = do {
-      firstChar <- letter <|> oneOf "_$";
-      restChar <- many (alphaNum <|> oneOf "_:$");
-      return $ firstChar : restChar}
-
 
 parseColumnQualified :: Parser ColumnQualified
 parseColumnQualified = do {
@@ -382,16 +360,6 @@ maybeLeftAlign t = f a b
     compToCompOrder (CNEQ _ _) = CNEQ
     compToCompOrder (CSEQ _ _) = CSEQ
     compToCompOrder (CLEQ _ _) = CLEQ
-
-
-groupMapBy :: (Ord k) => (a -> k) -> [a] -> M.Map k [a]
-groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
-
--- assert: xs is not empty.
-maybeAllMapToSame :: (Eq k) => (a->k) -> [a] -> Maybe k
-maybeAllMapToSame _ [] = Nothing
-maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Nothing
-
 
 -- given cnf -> collects clauses with same table alias on left side. (and rest clauses)
 splitPosCnfCompOrder ::
