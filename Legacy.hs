@@ -38,44 +38,19 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall))
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), collect)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip)
+import Util(negative)
 
 -- used in GROUP BY and HAVING clauses
 data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
                          deriving (Eq, Show, Ord, Functor)
 
---aggregateGetParam :: (AggregateFunction a) -> a
---aggregateGetParam (Max x) = x
---aggregateGetParam (Avg x) = x
---aggregateGetParam (Cnt x) = x
-
-
 data SelectExpression = SelectAggregate (AggregateFunction ColumnQualified)
                       | SelectColumn    ColumnQualified
                       -- | SelectMath      (MathExpr ColumnQualified)
                       deriving (Eq, Show, Ord)
-
-
-
-collectReads :: MathExpr a -> [a]
-collectReads (Read a) = [a]
-collectReads (Sca (DD _)) = []
-collectReads (Sca (II _)) = []
-collectReads (Sca (SS _)) = []
-collectReads (Add x y) = collectReads x ++ collectReads y
-collectReads (Sub x y) = collectReads x ++ collectReads y
-collectReads (Mul x y) = collectReads x ++ collectReads y
-collectReads (Div x y) = collectReads x ++ collectReads y
-collectReads (FnCall _) = []
-
-
-scalarToMathExpr :: SomeScalar -> MathExpr a
-scalarToMathExpr (DD d) = Sca $ DD d
-scalarToMathExpr (II i) = Sca $ II i
-scalarToMathExpr (SS s) = Sca $ SS s
-
 
 class PrClj a where
   pr :: a -> String
@@ -204,16 +179,6 @@ elemsCompOrder (CEQ x y) = (x,y)
 elemsCompOrder (CNEQ x y) = (x,y)
 elemsCompOrder (CSEQ x y) = (x,y)
 elemsCompOrder (CLEQ x y) = (x,y)
-
-
-negateComp :: CompOrder a b -> CompOrder a b
-negateComp x = case x of
-  (CST a b) -> CLEQ a b
-  (CLEQ a b) -> CST a b
-  (CEQ a b) -> CNEQ a b
-  (CNEQ a b) -> CEQ a b
-  (CSEQ a b) -> CLT a b
-  (CLT a b) -> CSEQ a b
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
@@ -609,7 +574,7 @@ data PosCNF a = PosClauses (S.Set (PosClause a))
 
 toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
 toPosCnf (Clauses cs) = PosClauses (S.map f cs)
-  where f (PosNeg gg hh) = PosC (S.union gg (S.map negateComp hh))
+  where f (PosNeg gg hh) = PosC (S.union gg (S.map negative hh))
 
 collectPosCnfLiterals :: PosCNF a -> [a]
 collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
@@ -800,7 +765,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
           -- we collect column names from the parent WHERE clause and insert them to child SELECT clause
           -- so they are available from the outside
           cMap2  = foldl (\cm (CQ _ (CN cn)) -> M.insert (CA cn) (CN cn) cm) cMap columnsFromJoinClause
-          columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals parentJoin
+          columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals parentJoin
           parentColumns  = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
           parentTableMap = M.insert tAlias child M.empty
           parentJoin     =  joinClause -- maybe rework it?
@@ -831,7 +796,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
   | (Right tts)           <- subTables,
     (Just joinConditions) <- whereJoin -- ,    Nothing <- groupByClause
     -- here: filter aliases from select and condition and replace them with aliases from subtables.
-  = let columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals joinConditions
+  = let columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals joinConditions
         columnsForTab :: TableAlias -> [ColumnName]
         columnsForTab ta = mapMaybe (\(CQ t c) -> if t==ta then Just c else Nothing) columnsFromJoinClause
 
@@ -874,7 +839,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
                 mergedWhereClause = conjunction cnf2
                                       (mapPosCnfLiterals
                                         (mapComp (Read . aliasToQualified)
-                                         scalarToMathExpr) (cnfColNameToAlias cnf))
+                                         Sca) (cnfColNameToAlias cnf))
             (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnfRenamed cnf2)
               where
                 -- we map back column aliases in the WHERE clause
