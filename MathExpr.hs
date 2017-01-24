@@ -48,6 +48,8 @@ instance (PrClj a) => PrClj (AggregateFn a) where
   pr (Min x) = "MIN(" ++ pr x ++ ")"
   pr (Sum x) = "SUM(" ++ pr x ++ ")"
 
+instance PrClj SomeScalar where
+  pr _ = "SomeScalar"
 
 parseAggregateFn :: Parser a -> Parser (AggregateFn a)
 parseAggregateFn p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM" Sum where

@@ -17,31 +17,30 @@ import Control.Monad
 import Data.Char(toUpper)
 
 import qualified Data.Set as S
-  (Set, union, empty, insert, elems, fromList,map, null, intersection,size)
+  (Set, union, empty, insert, elems, fromList, null, intersection)
 import qualified Data.Map.Strict as M
   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
     mapWithKey, traverseWithKey, member, alter, null, elems)
 
 import Data.Either()
 import Data.Foldable (concat, foldMap)
-import Data.List (intercalate, nub, delete)
 import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
 
 import Control.Applicative ((<$>))
 
 import Text.Parsec as TP
-  (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
+  ((<?>), (<|>), chainl1, string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
 import Text.Parsec.Combinator (optionMaybe)
 import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
-import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree)
+import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
 import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), collect)
 
-import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip)
-import Util(negative)
+import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems)
+import Util(PrClj(pr))
 
 -- used in GROUP BY and HAVING clauses
 data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
@@ -52,58 +51,9 @@ data SelectExpression = SelectAggregate (AggregateFunction ColumnQualified)
                       -- | SelectMath      (MathExpr ColumnQualified)
                       deriving (Eq, Show, Ord)
 
-class PrClj a where
-  pr :: a -> String
-
-instance (PrClj a) => PrClj [a] where
-  pr l = "[" ++ unwords (map pr l) ++ "]"
-
-instance PrClj ParseError where
-  pr pe = "{"
-          ++ kv ":expected" expects
-          ++ kv ":unexpected" unexpected
-          ++ kv ":messages"   messages
-          ++  "}"
-    where
-      kv k v = " " ++ k ++ " [" ++ unwords (map show $ delete "" $ nub v) ++ "]"
-      expects = [s | Expect s <- errorMessages pe]
-      messages = [s | Message s <- errorMessages pe]
-      unexpected = [s | UnExpect s <- errorMessages pe]
-                   ++ [s | SysUnExpect s <- errorMessages pe]
-
-instance (PrClj a) => PrClj (MathExpr a) where
-  pr (Sca (DD d)) = show d
-  pr (Sca (II i)) = show i
-  pr (Sca (SS s)) = show s
-  pr (Read t) = pr t
-  pr (Add a b) = "(+ " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (Sub a b) = "(- " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (Mul a b) = "(* " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (Div a b) = "(/ " ++ pr a ++ " " ++ pr b ++ ")"
-  pr (FnCall _) = "FNCALL" -- TODO: implement this
 
 instance PrClj ColumnQualified where
   pr (CQ (TA a) (CN b)) = a ++ "/" ++ b
-
-
-instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
-  pr (CEQ a b) = "(== " ++ pr a ++ " " ++ pr b ++")"
-  pr (CNEQ a b) = "(!= " ++ pr a ++ " " ++ pr b ++")"
-  pr (CLEQ a b) = "(>= " ++ pr a ++ " " ++ pr b ++")"
-  pr (CSEQ a b) = "(<= " ++ pr a ++ " " ++ pr b ++")"
-  pr (CLT a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
-  pr (CST a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
-
-
-instance (PrClj a) => PrClj (PosCNF a) where
-  pr (PosClauses cs) = "(cnf " ++ unwords (map f $ S.elems cs) ++ ")"
-    where
-      f (PosC c) = "[" ++ unwords (map pr (S.elems c)) ++ "]"
-
-instance (PrClj a, PrClj b) => PrClj (M.Map a b) where
-  pr m = "{"
-    ++ intercalate ", " (map (\(k,v)-> pr k ++ " " ++ pr v) $ M.assocs m)
-    ++ "}"
 
 
 someScalarMathExpr :: SomeScalar -> MathExpr a
@@ -170,15 +120,6 @@ parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
       <|> try (x ">=" CLEQ) <|> x ">" CLT
       <|> try (x "==" CEQ)  <|> x "=" CEQ
       <|> x "!=" CNEQ
-
-
-elemsCompOrder :: CompOrder a b -> (a,b)
-elemsCompOrder (CST x y) = (x,y)
-elemsCompOrder (CLT x y) = (x,y)
-elemsCompOrder (CEQ x y) = (x,y)
-elemsCompOrder (CNEQ x y) = (x,y)
-elemsCompOrder (CSEQ x y) = (x,y)
-elemsCompOrder (CLEQ x y) = (x,y)
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
@@ -251,16 +192,10 @@ instance (PrClj a) => PrClj (AggregateFunction a) where
   pr (Cnt x) = "(cnt " ++ pr x ++ ")"
   pr (Sum x) = "(sum " ++ pr x ++ ")"
 
-
 instance PrClj ResultQueryTree where
   pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
   pr (SimpleRQT a b c) = "{:select " ++ pr a ++ " :from " ++  pr b ++ " :where " ++ pr c ++ "}"
   pr (GroupRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :group-by " ++ pr c ++ "}"
-
-instance PrClj SomeScalar where
-  pr (II x) = show x
-  pr (DD x) = show x
-  pr (SS x) = show x
 
 instance PrClj SelectExpression where
   pr (SelectColumn cq) = pr cq
@@ -537,58 +472,8 @@ parseSimpleQuery =
     parseWithoutAlias = do {(CN cn) <- parseColumnName; return (CA cn, CN cn)}
     parseWithAlias = parseAsPair parseColumnName parseColumnAlias
 
--- a Clause is a disjunction of positive and negatives items.
-data Clause a = PosNeg (S.Set a) (S.Set a) deriving (Eq, Show, Read, Ord)
-data CNF a = Clauses (S.Set (Clause a)) deriving (Eq, Show,Read, Ord)
-
-
 oneset :: (Ord a) => a -> S.Set a
 oneset x = S.insert x S.empty
-
-
-toCnf :: (Ord a) => LogicTree a -> CNF a
-toCnf (And x y) = Clauses (S.union xs ys)
-  where
-    Clauses xs = toCnf x
-    Clauses ys = toCnf y
-toCnf (Not (And x y)) = toCnf (Or (Not x) (Not y))
-toCnf (Not (Or x y))  = toCnf (And (Not x) (Not y))
-toCnf (Or x y) = Clauses $ S.fromList $ map f ps
-  where
-    f (PosNeg ee ff, PosNeg gg hh) = PosNeg (S.union ee gg) (S.union ff hh)
-    ps = [(p,q) | p <- S.elems xs, q <- S.elems ys]
-    Clauses xs = toCnf x
-    Clauses ys = toCnf y
-toCnf (Not (Not e)) = toCnf e
-toCnf (Not (Leaf x)) = Clauses $ oneset (PosNeg S.empty (S.insert x S.empty))
-toCnf (Leaf x) = Clauses $ oneset (PosNeg (oneset x) S.empty)
-
-
--- disjunction of positive literals
-data PosClause a = PosC (S.Set a)
-  deriving (Eq, Show, Read, Ord)
--- conjuction of clauses
-data PosCNF a = PosClauses (S.Set (PosClause a))
-  deriving (Eq, Show, Read, Ord)
-
-
-toPosCnf :: (Ord a) => CNF (Comp a) -> PosCNF (Comp a)
-toPosCnf (Clauses cs) = PosClauses (S.map f cs)
-  where f (PosNeg gg hh) = PosC (S.union gg (S.map negative hh))
-
-collectPosCnfLiterals :: PosCNF a -> [a]
-collectPosCnfLiterals (PosClauses cs) = concatMap (\ (PosC c) -> S.elems c) (S.elems cs)
-
-conjunction :: (Ord a) => PosCNF a -> PosCNF a -> PosCNF a
-conjunction (PosClauses x) (PosClauses y) = PosClauses $ S.union x y
-
--- like `fmap` for PosCNF
-mapPosCnfLiterals :: (Ord a) => (Ord b) => (a -> b) -> PosCNF a -> PosCNF b
-mapPosCnfLiterals f (PosClauses cs) =
-  PosClauses (S.map (\ (PosC c) -> PosC (S.map f c)) cs)
-
-cnfAddClause :: (Ord a) => PosClause a -> PosCNF a -> PosCNF a
-cnfAddClause x (PosClauses cs) = PosClauses (S.insert x cs)
 
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 
@@ -632,24 +517,25 @@ splitPosCnfCompOrder ::
   PosCNF (CompOrder ColumnQualified SomeScalar)
   -> (Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)),
       M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar)))
-splitPosCnfCompOrder (PosClauses pcnf) = (common, spec)
+splitPosCnfCompOrder pcnf = (common, spec)
   where
-    common = liftM (PosClauses . S.fromList) (M.lookup Nothing m)
+
+    common = liftM CNF.fromClauses (M.lookup Nothing m)
     spec :: M.Map TableAlias (PosCNF (CompOrder ColumnName SomeScalar))
     spec =  M.foldlWithKey (\mm k v ->
                               (case k of  -- v is a list
-                                 Just a -> M.insert a (mapPosCnfLiterals
+                                 Just a -> M.insert a (mapPredicates
                                                        (mapComp (\(CQ _ c) -> c) id)
-                                                       (PosClauses (S.fromList v))) mm
+                                                       (CNF.fromClauses v)) mm
                                  Nothing -> mm)) M.empty m
 
-    m :: M.Map (Maybe TableAlias) [PosClause (CompOrder ColumnQualified SomeScalar)]
-    m = groupMapBy maybeHomogenClause (S.elems pcnf)
+    m :: M.Map (Maybe TableAlias) [[CompOrder ColumnQualified SomeScalar]]
+    m = groupMapBy maybeHomogenClause $ CNF.clauses pcnf
 
     -- RETURN TableAlias when all literal share the same.
-    maybeHomogenClause :: PosClause (CompOrder ColumnQualified SomeScalar) -> Maybe TableAlias
-    maybeHomogenClause (PosC clauseSet) =
-      maybeAllMapToSame ((\(CQ c _) -> c) . fst . elemsCompOrder) (S.elems clauseSet)
+    maybeHomogenClause :: [CompOrder ColumnQualified SomeScalar] -> Maybe TableAlias
+    maybeHomogenClause xs =
+      maybeAllMapToSame ((\(CQ c _) -> c) . fst . elems) xs
 
 
 type ParsedComp = Comp (MathExpr ColumnQualified)
@@ -659,7 +545,7 @@ type ParsedComp = Comp (MathExpr ColumnQualified)
 prepareWhereClauseFlatten
   :: PosCNF ParsedComp
         -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)))
-prepareWhereClauseFlatten (PosClauses clauses) = case (build bb, build aa) of
+prepareWhereClauseFlatten cnf = case (build bb, build aa) of
   -- if we have conditions to both filter and join and we have an equavalence join condition:
   -- then we create conditions that are implications of the equivalence.
   -- for example:
@@ -667,18 +553,18 @@ prepareWhereClauseFlatten (PosClauses clauses) = case (build bb, build aa) of
   (Just joinCnf, Just filterCnf) -> (Just joinCnf, Just (make_cnf joinCnf filterCnf))
   any_other_pair                 -> any_other_pair
   where
-    make_eqs (PosClauses joinClauses) = [(l, r) | (PosC clause) <- S.elems joinClauses,
-                                         1 == S.size clause,
-                                         (CEQ (Read l) (Read r)) <- S.elems clause]
+    make_eqs joinClauses = [(l, r) | [(CEQ (Read l) (Read r))] <- clauses joinClauses]
     make_cnf joinCnf = expandEquivalences (make_eqs joinCnf)
     --- Comp to CompOrder -> MaybeLeftAlign
-    doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeScalar))
-    doClause (PosC clause) = liftM (PosC . S.fromList) $ mapM maybeLeftAlign $ S.elems clause
-    build set = if S.null set then Nothing else Just $ PosClauses set
+    -- doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeScalar))
+    doClause clause =  mapM maybeLeftAlign $ clause
+    build xs = if CNF.null xs then Nothing else Just xs
+
+
     (aa,bb) = foldl (\(a,b) x -> case doClause x of
-                                   Just t  -> (S.insert t a, b);
-                                   Nothing -> (a, S.insert x b))
-                                                 (S.empty,S.empty) (S.elems clauses)
+                                   Just t  -> (insertClause t a, b);
+                                   Nothing -> (a, insertClause x b))
+                                                 (CNF.empty, CNF.empty) (clauses cnf)
 
 
 prepareWhereClause :: LogicTree ParsedComp
@@ -692,9 +578,9 @@ prepareWhereClause tree = case orderCnfMaybe of
       Nothing -> (Just $ convertBack aa , m);
       Just bb -> (Just $ conjunction (convertBack aa) bb, m)
   where
-    (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ toPosCnf $ toCnf tree
+    (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ treeToPosCnf tree
     convertBack :: PosCNF (CompOrder ColumnQualified SomeScalar) -> PosCNF ParsedComp
-    convertBack = mapPosCnfLiterals (mapComp Read someScalarMathExpr)
+    convertBack = mapPredicates (mapComp Read someScalarMathExpr)
 
 
 mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
@@ -765,7 +651,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
           -- we collect column names from the parent WHERE clause and insert them to child SELECT clause
           -- so they are available from the outside
           cMap2  = foldl (\cm (CQ _ (CN cn)) -> M.insert (CA cn) (CN cn) cm) cMap columnsFromJoinClause
-          columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals parentJoin
+          columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ CNF.predicates parentJoin
           parentColumns  = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
           parentTableMap = M.insert tAlias child M.empty
           parentJoin     =  joinClause -- maybe rework it?
@@ -796,7 +682,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
   | (Right tts)           <- subTables,
     (Just joinConditions) <- whereJoin -- ,    Nothing <- groupByClause
     -- here: filter aliases from select and condition and replace them with aliases from subtables.
-  = let columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals joinConditions
+  = let columnsFromJoinClause = concatMap collect $ concatMap (\(x,y) -> [x,y]) $ map sides $ predicates joinConditions
         columnsForTab :: TableAlias -> [ColumnName]
         columnsForTab ta = mapMaybe (\(CQ t c) -> if t==ta then Just c else Nothing) columnsFromJoinClause
 
@@ -832,18 +718,18 @@ processTreeCore (PQT columnMap tableMap whereClause _)
             (Right (GroupRQT a b c)) -> Right $ GroupRQT a b c -- TODO: what is it for??
             (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause) -- TODO group by
               where
-                cnfColNameToAlias = mapPosCnfLiterals $ mapComp (\(CN x) -> CA x) id
+                cnfColNameToAlias = mapPredicates $ mapComp (\(CN x) -> CA x) id
                 aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
                 -- TODO: handle other cases too.
                 asSimple = M.fromList $ map (\ (CA _, CQ ta (CN cn)) -> (CA cn, CQ ta (CN cn))) $ M.assocs as
                 mergedWhereClause = conjunction cnf2
-                                      (mapPosCnfLiterals
+                                      (mapPredicates
                                         (mapComp (Read . aliasToQualified)
                                          Sca) (cnfColNameToAlias cnf))
             (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnfRenamed cnf2)
               where
                 -- we map back column aliases in the WHERE clause
-                cnfRenamed = mapPosCnfLiterals (mapComp mapColName id) cnf
+                cnfRenamed = mapPredicates (mapComp mapColName id) cnf
                 mapColName :: ColumnName -> ColumnName
                 mapColName (CN colName) = case M.lookup (CA colName) as of
                   (Just cn) -> cn
@@ -895,24 +781,22 @@ expandEquivalences :: forall a . (Eq a, Ord a) =>
 expandEquivalences equivs cnf = newCnf
   where
 
-    clauses :: [PosClause (CompOrder a SomeScalar)]
-    clauses = S.elems cs where (PosClauses cs) = cnf
+    clauses :: [[CompOrder a SomeScalar]]
+    clauses = CNF.clauses cnf
 
     equivalences :: [(a,a)]
     equivalences = spanEquations equivs -- equivs ++ map swap equivs
 
       -- decides if this clause should be extended to other relations
-    maybeRel :: PosClause (CompOrder a SomeScalar) -> Maybe a
-    maybeRel clause -- when all left sides are the same, no column name on right side.
-      | (PosC literals) <- clause,
-        xs <- S.elems literals,
-        leftSides <- map (fst . sides) xs,
+    maybeRel :: [CompOrder a SomeScalar] -> Maybe a
+    maybeRel xs -- when all left sides are the same, no column name on right side.
+      | leftSides <- map (fst . sides) xs,
         allTheSame leftSides
         = listToMaybe leftSides
       | otherwise = Nothing
 
         -- maps to clauses that only have key on left side (and no column on right)
-    homogenClausesMap :: M.Map a [PosClause (CompOrder a SomeScalar)]
+    homogenClausesMap :: M.Map a [[CompOrder a SomeScalar]]
     homogenClausesMap = foldl rf M.empty clauses where
       -- rf :: M.Map a (PosClause (CompOrder a SomeScalar))
       rf m clause = case maybeRel clause of
@@ -922,11 +806,11 @@ expandEquivalences equivs cnf = newCnf
           alter Nothing = Just [clause]
           alter (Just xs) = Just (clause : xs)
 
-    reClause :: a -> PosClause (CompOrder a SomeScalar) -> PosClause (CompOrder a SomeScalar)
-    reClause newKey (PosC clause) = PosC $ S.map (mapComp (const newKey) id) clause
+    reClause :: a -> [(CompOrder a SomeScalar)] -> [(CompOrder a SomeScalar)]
+    reClause newKey clause = map (mapComp (const newKey) id) clause
 
     newCnf :: PosCNF (CompOrder a SomeScalar)
-    newCnf = foldl (Prelude.flip cnfAddClause) cnf kk where
+    newCnf = foldl (Prelude.flip insertClause) cnf kk where
       kk = [reClause k2 clause
            | (k1, k2) <- equivalences,
              clause <- Data.Foldable.concat $ M.lookup k1 homogenClausesMap]

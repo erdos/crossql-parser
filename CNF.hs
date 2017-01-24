@@ -132,7 +132,7 @@ clauses (PosClauses x) = [S.elems y | (PosC y) <- S.elems x]
 predicates :: PosCNF a -> [a]
 predicates = concat . clauses
 
-mapPredicates :: (Ord a, Ord b) => (a -> b) -> (PosCNF a) -> (PosCNF b)
+mapPredicates :: (Ord a, Ord b) => (a -> b) -> PosCNF a -> PosCNF b
 mapPredicates f cnf = fromClauses [map f xs | xs <- clauses cnf]
 
 fromClauses :: (Ord a) => [[a]] -> PosCNF a
