@@ -9,14 +9,16 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar) where
+module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr) where
 
 import Util
 
+import Control.Monad
 -- import Data.Map.Strict
 import Control.Applicative ((<$>))
 import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (mempty, mappend)
+import Data.Maybe(fromMaybe)
 
 import Text.Parsec as TP ((<|>), chainl1, string, spaces, try)
 import Text.Parsec.Language
@@ -114,3 +116,31 @@ parse = parseMathExpr parseSomeScalar
 mathMaybeScalar :: MathExpr a -> Maybe SomeScalar
 mathMaybeScalar (Sca s) = Just s
 mathMaybeScalar _ = Nothing
+
+
+maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
+maybeEvalScalar expr = case simplifyMathExpr expr of
+  (Sca (DD d)) -> Just $ DD d
+  (Sca (II i)) -> Just $ II i
+  (Sca (SS s)) -> Just $ SS s
+  _ -> Nothing
+
+simplifyMathExpr :: forall t. MathExpr t -> MathExpr t
+simplifyMathExpr expr = case expr of
+  (Add a b) -> ccc expr a b ((Just .) . (+)) ((Just .) . (+)) ((Just .) . (++))
+  (Sub a b) -> ccc expr a b ((Just .) . (-)) ((Just .) . (-)) (\ _ _ -> Nothing)
+  (Mul a b) -> ccc expr a b ((Just .) . (*)) ((Just .) . (*)) (\ _ _ -> Nothing)
+  (Div a b) -> ccc expr a b ((Just .) . div) ((Just .) . (/)) (\ _ _ -> Nothing)
+  _ -> expr
+  where
+    ccc original x y f g h = fromMaybe original $ calc x y f g h
+    calc x y f g h = op f g h (simplifyMathExpr x) (simplifyMathExpr y)
+    op _ f _ (Sca (DD i)) (Sca (DD j)) =  liftM (Sca .  DD) $ f i j
+    op _ f _ (Sca (II i)) (Sca (DD d)) = liftM (Sca . DD) $ f (fromIntegral i) d
+    op _ f _ (Sca (DD d)) (Sca (II i)) = liftM (Sca . DD) $ f d (fromIntegral i)
+    op f _ _ (Sca (II x)) (Sca (II y)) = liftM (Sca . II) $ f x y
+    op _ _ f (Sca (SS s)) (Sca (DD d)) = liftM (Sca . SS) $ f s (show d)
+    op _ _ f (Sca (SS s)) (Sca (II i)) = liftM (Sca . SS) $ f s (show i)
+    op _ _ f (Sca (DD d)) (Sca (SS s)) = liftM (Sca . SS) $ f (show d) s
+    op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
+    op _ _ _ _ _ = Nothing

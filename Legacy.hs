@@ -24,7 +24,7 @@ import qualified Data.Map.Strict as M
 
 import Data.Either()
 import Data.Foldable (concat, foldMap)
-import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
+import Data.Maybe(listToMaybe, mapMaybe)
 
 import Control.Applicative ((<$>))
 
@@ -37,7 +37,7 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar)
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar, maybeEvalScalar)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
 import Util(PrClj(pr))
@@ -51,37 +51,6 @@ data SelectExpression = SelectAggregate (AggregateFn ColumnQualified)
 
 instance PrClj ColumnQualified where
   pr (CQ (TA a) (CN b)) = a ++ "/" ++ b
-
-
-someScalarMathExpr :: SomeScalar -> MathExpr a
-someScalarMathExpr = Sca
-
-maybeEvalScalar :: MathExpr t -> Maybe SomeScalar
-maybeEvalScalar expr = case simplifyMathExpr expr of
-  (Sca (DD d)) -> Just $ DD d
-  (Sca (II i)) -> Just $ II i
-  (Sca (SS s)) -> Just $ SS s
-  _ -> Nothing
-
-simplifyMathExpr :: forall t. MathExpr t -> MathExpr t
-simplifyMathExpr expr = case expr of
-  (Add a b) -> ccc expr a b ((Just .) . (+)) ((Just .) . (+)) ((Just .) . (++))
-  (Sub a b) -> ccc expr a b ((Just .) . (-)) ((Just .) . (-)) (\ _ _ -> Nothing)
-  (Mul a b) -> ccc expr a b ((Just .) . (*)) ((Just .) . (*)) (\ _ _ -> Nothing)
-  (Div a b) -> ccc expr a b ((Just .) . div) ((Just .) . (/)) (\ _ _ -> Nothing)
-  _ -> expr
-  where
-    ccc original x y f g h = fromMaybe original $ calc x y f g h
-    calc x y f g h = op f g h (simplifyMathExpr x) (simplifyMathExpr y)
-    op _ f _ (Sca (DD i)) (Sca (DD j)) =  liftM (Sca .  DD) $ f i j
-    op _ f _ (Sca (II i)) (Sca (DD d)) = liftM (Sca . DD) $ f (fromIntegral i) d
-    op _ f _ (Sca (DD d)) (Sca (II i)) = liftM (Sca . DD) $ f d (fromIntegral i)
-    op f _ _ (Sca (II x)) (Sca (II y)) = liftM (Sca . II) $ f x y
-    op _ _ f (Sca (SS s)) (Sca (DD d)) = liftM (Sca . SS) $ f s (show d)
-    op _ _ f (Sca (SS s)) (Sca (II i)) = liftM (Sca . SS) $ f s (show i)
-    op _ _ f (Sca (DD d)) (Sca (SS s)) = liftM (Sca . SS) $ f (show d) s
-    op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
-    op _ _ _ _ _ = Nothing
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
@@ -499,7 +468,7 @@ prepareWhereClause tree = case orderCnfMaybe of
   where
     (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ treeToPosCnf tree
     convertBack :: PosCNF (CompOrder ColumnQualified SomeScalar) -> PosCNF ParsedComp
-    convertBack = mapPredicates (Comp.mapSides Read someScalarMathExpr)
+    convertBack = mapPredicates (Comp.mapSides Read Sca)
 
 
 mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
