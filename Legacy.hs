@@ -17,7 +17,7 @@ import Control.Monad
 import Data.Char(toUpper)
 
 import qualified Data.Set as S
-  (Set, union, empty, insert, elems, fromList, null, intersection)
+  (Set, union, elems, fromList, null, intersection)
 import qualified Data.Map.Strict as M
   (Map, fromList, empty, insertWith, lookup, foldlWithKey, insert,  assocs, map,
     mapWithKey, traverseWithKey, member, alter, null, elems)
@@ -31,13 +31,13 @@ import Control.Applicative ((<$>))
 import Text.Parsec as TP
   ((<?>), (<|>), chainl1, string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
 import Text.Parsec.Combinator (optionMaybe)
-import Text.Parsec.Error (Message(..), errorMessages)
+
 import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), collect)
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems)
 import Util(PrClj(pr))
@@ -472,9 +472,6 @@ parseSimpleQuery =
     parseWithoutAlias = do {(CN cn) <- parseColumnName; return (CA cn, CN cn)}
     parseWithAlias = parseAsPair parseColumnName parseColumnAlias
 
-oneset :: (Ord a) => a -> S.Set a
-oneset x = S.insert x S.empty
-
 -- visitComp :: ((a -> a -> Comp a) -> a -> a -> b) -> Comp a -> b
 
   -- try to produce left aligned conditions.
@@ -781,8 +778,8 @@ expandEquivalences :: forall a . (Eq a, Ord a) =>
 expandEquivalences equivs cnf = newCnf
   where
 
-    clauses :: [[CompOrder a SomeScalar]]
-    clauses = CNF.clauses cnf
+    clauses2 :: [[CompOrder a SomeScalar]]
+    clauses2 = CNF.clauses cnf
 
     equivalences :: [(a,a)]
     equivalences = spanEquations equivs -- equivs ++ map swap equivs
@@ -797,7 +794,7 @@ expandEquivalences equivs cnf = newCnf
 
         -- maps to clauses that only have key on left side (and no column on right)
     homogenClausesMap :: M.Map a [[CompOrder a SomeScalar]]
-    homogenClausesMap = foldl rf M.empty clauses where
+    homogenClausesMap = foldl rf M.empty clauses2 where
       -- rf :: M.Map a (PosClause (CompOrder a SomeScalar))
       rf m clause = case maybeRel clause of
         Nothing -> m
@@ -806,8 +803,8 @@ expandEquivalences equivs cnf = newCnf
           alter Nothing = Just [clause]
           alter (Just xs) = Just (clause : xs)
 
-    reClause :: a -> [(CompOrder a SomeScalar)] -> [(CompOrder a SomeScalar)]
-    reClause newKey clause = map (mapComp (const newKey) id) clause
+    reClause :: a -> [CompOrder a SomeScalar] -> [CompOrder a SomeScalar]
+    reClause newKey = map (mapComp (const newKey) id)
 
     newCnf :: PosCNF (CompOrder a SomeScalar)
     newCnf = foldl (Prelude.flip insertClause) cnf kk where
