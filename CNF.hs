@@ -10,9 +10,9 @@ module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, tree
 
 import Util
 
---import Control.Applicative ((<$>))
---import Data.Foldable (Foldable, foldMap)
---import Data.Monoid (mappend)
+import Control.Applicative ((<$>))
+import Data.Foldable (Foldable, foldMap)
+import Data.Monoid (mappend)
 
 import Data.List (partition)
 import Text.Parsec as TP ((<|>), chainl1, spaces)

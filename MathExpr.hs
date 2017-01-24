@@ -9,14 +9,14 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn, MathExpr(Sca, Read), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar) where
+module MathExpr (collect, AggregateFn, MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar) where
 
 import Util
 
 -- import Data.Map.Strict
--- import Control.Applicative ((<$>))
--- import Data.Foldable (Foldable, foldMap)
--- import Data.Monoid (mempty, mappend)
+import Control.Applicative ((<$>))
+import Data.Foldable (Foldable, foldMap)
+import Data.Monoid (mempty, mappend)
 
 import Text.Parsec as TP ((<|>), chainl1, string, spaces, try)
 import Text.Parsec.Language
@@ -32,7 +32,7 @@ parseSomeScalar = s <|> n where
           return (case x of (Left i) -> II i; (Right d) -> DD d)}
 
 data AggregateFn a = Avg a | Cnt a | Max a | Min a | Sum a
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Ord, Functor)
 
 arg1 :: AggregateFn a -> a
 arg1 (Avg x) = x
@@ -66,7 +66,7 @@ data MathExpr a = Sca SomeScalar
                 | Mul (MathExpr a) (MathExpr a)
                 | Div (MathExpr a) (MathExpr a)
                 | FnCall (AggregateFn a)
-                deriving (Eq, Show, Ord)
+                deriving (Eq, Show, Ord, Functor)
 
 instance Foldable MathExpr where
   foldMap f (Read x) = f x

@@ -23,9 +23,11 @@ import qualified Data.Map.Strict as M
     mapWithKey, traverseWithKey, member, alter, null, elems)
 
 import Data.Either()
-import Data.Foldable (concat)
+import Data.Foldable (concat, foldMap)
 import Data.List (intercalate, nub, delete)
 import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
+
+import Control.Applicative ((<$>))
 
 import Text.Parsec as TP
   (ParseError, (<?>), (<|>), chainl1, string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
@@ -36,7 +38,7 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div))
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall))
 
 -- used in GROUP BY and HAVING clauses
 data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
@@ -64,6 +66,7 @@ collectReads (Add x y) = collectReads x ++ collectReads y
 collectReads (Sub x y) = collectReads x ++ collectReads y
 collectReads (Mul x y) = collectReads x ++ collectReads y
 collectReads (Div x y) = collectReads x ++ collectReads y
+collectReads (FnCall _) = []
 
 
 scalarToMathExpr :: SomeScalar -> MathExpr a
@@ -100,7 +103,7 @@ instance (PrClj a) => PrClj (MathExpr a) where
   pr (Sub a b) = "(- " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Mul a b) = "(* " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Div a b) = "(/ " ++ pr a ++ " " ++ pr b ++ ")"
-
+  pr (FnCall _) = "FNCALL" -- TODO: implement this
 
 instance PrClj ColumnQualified where
   pr (CQ (TA a) (CN b)) = a ++ "/" ++ b
@@ -146,14 +149,14 @@ simplifyMathExpr expr = case expr of
   where
     ccc original x y f g h = fromMaybe original $ calc x y f g h
     calc x y f g h = op f g h (simplifyMathExpr x) (simplifyMathExpr y)
-    op _ f _ (Sca (DD i)) (Sca (DD j)) = Sca $ liftM DD $ f i j
-    op _ f _ (Sca (II i)) (Sca (DD d)) = Sca $ liftM DD $ f (fromIntegral i) d
-    op _ f _ (Sca (DD d)) (Sca (II i)) = Sca $ liftM DD $ f d (fromIntegral i)
-    op f _ _ (Sca (II x)) (Sca (II y)) = Sca $ liftM II $ f x y
-    op _ _ f (Sca (SS s)) (Sca (DD d)) = Sca $ liftM SS $ f s (show d)
-    op _ _ f (Sca (SS s)) (Sca (II i)) = Sca $ liftM SS $ f s (show i)
-    op _ _ f (Sca (DD d)) (Sca (SS s)) = Sca $ liftM SS $ f (show d) s
-    op _ _ f (Sca (II i)) (Sca (SS s)) = Sca $ liftM SS $ f (show i) s
+    op _ f _ (Sca (DD i)) (Sca (DD j)) =  liftM (Sca .  DD) $ f i j
+    op _ f _ (Sca (II i)) (Sca (DD d)) = liftM (Sca . DD) $ f (fromIntegral i) d
+    op _ f _ (Sca (DD d)) (Sca (II i)) = liftM (Sca . DD) $ f d (fromIntegral i)
+    op f _ _ (Sca (II x)) (Sca (II y)) = liftM (Sca . II) $ f x y
+    op _ _ f (Sca (SS s)) (Sca (DD d)) = liftM (Sca . SS) $ f s (show d)
+    op _ _ f (Sca (SS s)) (Sca (II i)) = liftM (Sca . SS) $ f s (show i)
+    op _ _ f (Sca (DD d)) (Sca (SS s)) = liftM (Sca . SS) $ f (show d) s
+    op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
     op _ _ _ _ _ = Nothing
 
 
@@ -400,8 +403,8 @@ parseMathExpr f = _start
     -- TODO: add support for negative sign!
     -- TODO: add function calls!
     _number = do {x <- naturalOrFloat haskell;
-                  return (case x of (Left i) -> II i; (Right d) -> DD d)}
-    _string = SS <$> stringLiteral haskell
+                  return (case x of (Left i) -> Sca $ II i; (Right d) -> Sca $ DD d)}
+    _string = Sca . SS <$> stringLiteral haskell
     _col    = Read <$> f
     _sum    = chainl1 _prod (ss "+" Add <|> ss "-" Sub)
     _prod   = chainl1 _ll   (ss "*" Mul <|> ss "/" Div)
