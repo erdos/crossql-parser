@@ -1,6 +1,5 @@
 #!/usr/bin/env runhaskell
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -34,9 +33,8 @@ import Text.Parsec.Language
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
-import CNF(LogicTree(And,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null, unfoldLogicTree)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar, maybeEvalScalar)
-
+import CNF
+import MathExpr
 import Comp
 import Util
 
