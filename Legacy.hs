@@ -37,16 +37,13 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr)
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr, AggregateFn, parseAggregateFn)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
 import Util(PrClj(pr))
 
 -- used in GROUP BY and HAVING clauses
-data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
-                         deriving (Eq, Show, Ord, Functor)
-
-data SelectExpression = SelectAggregate (AggregateFunction ColumnQualified)
+data SelectExpression = SelectAggregate (AggregateFn ColumnQualified)
                       | SelectColumn    ColumnQualified
                       -- | SelectMath      (MathExpr ColumnQualified)
                       deriving (Eq, Show, Ord)
@@ -101,21 +98,21 @@ type ColumnMap         = M.Map ColumnAlias ColumnQualified
 type ParsedFromClause  = M.Map TableAlias (Either ParsedQueryTree TableName)
 type ParsedWhereClause = LogicTree (Comp (MathExpr ColumnQualified))
 
-data SelectMapSlice = SMSlice (M.Map ColumnAlias ColumnQualified) (M.Map ColumnAlias (AggregateFunction ColumnQualified))
+data SelectMapSlice = SMSlice (M.Map ColumnAlias ColumnQualified) (M.Map ColumnAlias (AggregateFn ColumnQualified))
 
 splitSelectMap :: SelectMap -> SelectMapSlice
 splitSelectMap m = foldl f (SMSlice M.empty M.empty) (M.assocs m)
   where
-    f (SMSlice a b) (k, (SelectAggregate af)) = SMSlice a (M.insert k af b)
-    f (SMSlice a b) (k, SelectColumn cq)      = SMSlice (M.insert k cq a) b
+    f (SMSlice a b) (k, SelectAggregate af) = SMSlice a (M.insert k af b)
+    f (SMSlice a b) (k, SelectColumn cq)    = SMSlice (M.insert k cq a) b
 
 collectCQ :: ParsedWhereClause -> [ColumnQualified]
 collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . sides) $ foldMap (:[]) w
 
 
-data GroupingClause = GroupBy (M.Map ColumnAlias (AggregateFunction ColumnQualified))
+data GroupingClause = GroupBy (M.Map ColumnAlias (AggregateFn ColumnQualified))
                               [ColumnQualified]
-                              (Maybe (LogicTree (CompOrder (AggregateFunction ColumnQualified) SomeScalar)))
+                              (Maybe (LogicTree (CompOrder (AggregateFn ColumnQualified) SomeScalar)))
                     deriving (Eq, Show)
 
 
@@ -130,7 +127,7 @@ data ResultQueryTree = NestedRQT
                          (M.Map TableAlias ResultQueryTree)
                          (PosCNF (Comp (MathExpr ColumnQualified)))
                      | GroupRQT
-                         (M.Map ColumnAlias (AggregateFunction ColumnAlias))
+                         (M.Map ColumnAlias (AggregateFn ColumnAlias))
                          ResultQueryTree
                          [ColumnAlias] -- group by them. also, return them. (not necessary by sql syntax)
                      | SimpleRQT
@@ -150,12 +147,6 @@ instance PrClj TableName where
 
 instance PrClj TableAlias where
   pr (TA s) = s
-
-instance (PrClj a) => PrClj (AggregateFunction a) where
-  pr (Max x) = "(max " ++ pr x ++ ")"
-  pr (Avg x) = "(avg " ++ pr x ++ ")"
-  pr (Cnt x) = "(cnt " ++ pr x ++ ")"
-  pr (Sum x) = "(sum " ++ pr x ++ ")"
 
 instance PrClj ResultQueryTree where
   pr (NestedRQT a b c) = "{:select " ++ pr a ++ " :from " ++ pr b ++ " :where " ++ pr c ++ "}"
@@ -233,17 +224,6 @@ parseSelectMap = M.fromList <$> commaSep1 haskell selectPart
 
     -- TODO: add parsing aggregate without alias (alias name shall be generated)
 
-
-parseAggregateFun :: Parser a -> Parser (AggregateFunction a)
-parseAggregateFun p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM" Sum where
-  ff s f = try $ do
-    _ <-stringI s;
-    _<-string"("; spaces;
-    x <- p;
-    spaces; _<-string ")";
-    return $ f x
-
-
 parseSomeScalar :: Parser SomeScalar
 parseSomeScalar = s <|> n where
   s = SS <$> stringLiteral haskell
@@ -252,7 +232,7 @@ parseSomeScalar = s <|> n where
 
 
 parseSelectExpression :: Parser SelectExpression
-parseSelectExpression = try (SelectAggregate <$> parseAggregateFun parseColumnQualified)
+parseSelectExpression = try (SelectAggregate <$> parseAggregateFn parseColumnQualified)
                         <|> (SelectColumn <$> parseColumnQualified)
 
 
@@ -356,11 +336,11 @@ parseGroupBySuffix = do
   commaSep1 haskell parseColumnQualified;
 
 
-parseHavingSuffix :: Parser (LogicTree (CompOrder (AggregateFunction ColumnQualified) SomeScalar))
+parseHavingSuffix :: Parser (LogicTree (CompOrder (AggregateFn ColumnQualified) SomeScalar))
 parseHavingSuffix = do
   _ <- stringI "HAVING";
   spaces;
-  parseLogicTree $ Comp.parse (parseAggregateFun parseColumnQualified) parseSomeScalar
+  parseLogicTree $ Comp.parse (parseAggregateFn parseColumnQualified) parseSomeScalar
 
 
 -- parses a query with one tablename/table in it, therefore no col aliases needed.
