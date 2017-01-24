@@ -29,7 +29,7 @@ import Data.Maybe(listToMaybe, mapMaybe, fromMaybe)
 import Control.Applicative ((<$>))
 
 import Text.Parsec as TP
-  ((<?>), (<|>), chainl1, string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
+  ((<?>), (<|>), string,runParser, spaces, try, satisfy, letter, alphaNum, many, many1, oneOf, char, noneOf)
 import Text.Parsec.Combinator (optionMaybe)
 
 import Text.Parsec.Language
@@ -37,9 +37,9 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect)
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr)
 
-import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems)
+import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
 import Util(PrClj(pr))
 
 -- used in GROUP BY and HAVING clauses
@@ -85,41 +85,6 @@ simplifyMathExpr expr = case expr of
     op _ _ f (Sca (DD d)) (Sca (SS s)) = liftM (Sca . SS) $ f (show d) s
     op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
     op _ _ _ _ _ = Nothing
-
-
-mapComp :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
-mapComp f g (CEQ x y) = CEQ (f x) (g y)
-mapComp f g (CNEQ x y) = CNEQ (f x) (g y)
-mapComp f g (CLT x y) = CLT (f x) (g y)
-mapComp f g (CST x y) = CST (f x) (g y)
-mapComp f g (CLEQ x y) = CLEQ (f x) (g y)
-mapComp f g (CSEQ x y) = CSEQ (f x) (g y)
-
-mapComp1 :: (a -> e) -> Comp a -> Comp e
-mapComp1 f = mapComp f f
-
-parseCompOrder :: Parser a -> Parser b -> Parser (CompOrder a b)
-parseCompOrder f g = do {a <- f; spaces; c <- op; spaces; b <- g; return (c a b)}
-  where
-    op :: Parser (a -> b -> CompOrder a b)
-    x p q = string p >> return q
-    op =  try (x "<>" CNEQ)
-      <|> try (x "<=" CSEQ) <|> x "<" CST
-      <|> try (x ">=" CLEQ) <|> x ">" CLT
-      <|> try (x "==" CEQ)  <|> x "=" CEQ
-      <|> x "!=" CNEQ
-
-
-parseComp :: Parser a -> Parser (Comp a)
-parseComp f = do {a <- f; spaces; c <- op; spaces; b <- f; return (c a b)}
-  where
-    op :: Parser (a -> a -> Comp a)
-    x p q = string p >> return q
-    op =  try (x "<>" CNEQ)
-      <|> try (x "<=" CSEQ) <|> x "<" CST
-      <|> try (x ">=" CLEQ) <|> x ">" CLT
-      <|> try (x "==" CEQ)  <|> x "=" CEQ
-      <|> x "!=" CNEQ
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
@@ -269,23 +234,6 @@ parseSelectMap = M.fromList <$> commaSep1 haskell selectPart
     -- TODO: add parsing aggregate without alias (alias name shall be generated)
 
 
-parseMathExpr :: Parser a -> Parser (MathExpr a)
-parseMathExpr f = _start
-  where
-    ss s p = do{_<-string s; return p}
-    _start = _sum
-    -- TODO: add support for negative sign!
-    -- TODO: add function calls!
-    _number = do {x <- naturalOrFloat haskell;
-                  return (case x of (Left i) -> Sca $ II i; (Right d) -> Sca $ DD d)}
-    _string = Sca . SS <$> stringLiteral haskell
-    _col    = Read <$> f
-    _sum    = chainl1 _prod (ss "+" Add <|> ss "-" Sub)
-    _prod   = chainl1 _ll   (ss "*" Mul <|> ss "/" Div)
-    _atom   = parens haskell _sum <|> _col <|> _number<|>_string
-    _ll     = do{spaces; x <- _atom; spaces; return x} --parens haskell _sum <|> _col <|>_number <|> _string
-
-
 parseAggregateFun :: Parser a -> Parser (AggregateFunction a)
 parseAggregateFun p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM" Sum where
   ff s f = try $ do
@@ -314,7 +262,7 @@ parseWhereClause1 :: forall a. Parser a -> Parser (LogicTree (Comp (MathExpr a))
 parseWhereClause1 p = unfoldLogicTree <$> parseLogicTree (try parse_between <|> (Leaf <$> pc))
   where
     pc :: Parser (Comp (MathExpr a))
-    pc = parseComp $ parseMathExpr p
+    pc = Comp.parse1 $ parseMathExpr p
 
     parse_between :: Parser (LogicTree (Comp (MathExpr a)))
     parse_between = do
@@ -412,7 +360,7 @@ parseHavingSuffix :: Parser (LogicTree (CompOrder (AggregateFunction ColumnQuali
 parseHavingSuffix = do
   _ <- stringI "HAVING";
   spaces;
-  parseLogicTree $ parseCompOrder (parseAggregateFun parseColumnQualified) parseSomeScalar
+  parseLogicTree $ Comp.parse (parseAggregateFun parseColumnQualified) parseSomeScalar
 
 
 -- parses a query with one tablename/table in it, therefore no col aliases needed.
@@ -460,7 +408,7 @@ parseSimpleQuery =
 
 
     toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
-    toWhereClause t = fmap $ mapComp1 $ fmap $ CQ t
+    toWhereClause t = fmap $ Comp.mapSides1 $ fmap $ CQ t
 
     parseFrom :: Parser (Either ParsedQueryTree TableName)
     parseFrom = try  (Right <$> parseTableName)
@@ -522,7 +470,7 @@ splitPosCnfCompOrder pcnf = (common, spec)
     spec =  M.foldlWithKey (\mm k v ->
                               (case k of  -- v is a list
                                  Just a -> M.insert a (mapPredicates
-                                                       (mapComp (\(CQ _ c) -> c) id)
+                                                       (Comp.mapSides (\(CQ _ c) -> c) id)
                                                        (CNF.fromClauses v)) mm
                                  Nothing -> mm)) M.empty m
 
@@ -577,7 +525,7 @@ prepareWhereClause tree = case orderCnfMaybe of
   where
     (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ treeToPosCnf tree
     convertBack :: PosCNF (CompOrder ColumnQualified SomeScalar) -> PosCNF ParsedComp
-    convertBack = mapPredicates (mapComp Read someScalarMathExpr)
+    convertBack = mapPredicates (Comp.mapSides Read someScalarMathExpr)
 
 
 mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
@@ -715,18 +663,18 @@ processTreeCore (PQT columnMap tableMap whereClause _)
             (Right (GroupRQT a b c)) -> Right $ GroupRQT a b c -- TODO: what is it for??
             (Right (NestedRQT as tsm cnf2)) -> Right (NestedRQT asSimple tsm mergedWhereClause) -- TODO group by
               where
-                cnfColNameToAlias = mapPredicates $ mapComp (\(CN x) -> CA x) id
+                cnfColNameToAlias = mapPredicates $ Comp.mapSides (\(CN x) -> CA x) id
                 aliasToQualified x = cq where (Just cq) = M.lookup x columnMap -- what if!
                 -- TODO: handle other cases too.
                 asSimple = M.fromList $ map (\ (CA _, CQ ta (CN cn)) -> (CA cn, CQ ta (CN cn))) $ M.assocs as
                 mergedWhereClause = conjunction cnf2
                                       (mapPredicates
-                                        (mapComp (Read . aliasToQualified)
+                                        (Comp.mapSides (Read . aliasToQualified)
                                          Sca) (cnfColNameToAlias cnf))
             (Right (SimpleRQT as tsm cnf2)) -> Right $ SimpleRQT asSimple tsm (conjunction cnfRenamed cnf2)
               where
                 -- we map back column aliases in the WHERE clause
-                cnfRenamed = mapPredicates (mapComp mapColName id) cnf
+                cnfRenamed = mapPredicates (Comp.mapSides mapColName id) cnf
                 mapColName :: ColumnName -> ColumnName
                 mapColName (CN colName) = case M.lookup (CA colName) as of
                   (Just cn) -> cn
@@ -804,7 +752,7 @@ expandEquivalences equivs cnf = newCnf
           alter (Just xs) = Just (clause : xs)
 
     reClause :: a -> [CompOrder a SomeScalar] -> [CompOrder a SomeScalar]
-    reClause newKey = map (mapComp (const newKey) id)
+    reClause newKey = map (Comp.mapSides (const newKey) id)
 
     newCnf :: PosCNF (CompOrder a SomeScalar)
     newCnf = foldl (Prelude.flip insertClause) cnf kk where
