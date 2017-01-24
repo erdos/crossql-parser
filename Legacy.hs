@@ -40,6 +40,8 @@ import Text.Parsec.Token as TPT
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree)
 import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall))
 
+import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip)
+
 -- used in GROUP BY and HAVING clauses
 data AggregateFunction a = Max a | Avg a | Cnt a | Sum a
                          deriving (Eq, Show, Ord, Functor)
@@ -160,24 +162,6 @@ simplifyMathExpr expr = case expr of
     op _ _ _ _ _ = Nothing
 
 
-data CompOrder a b = CST a b
-                   | CLT a b
-                   | CEQ a b
-                   | CLEQ a b
-                   | CSEQ a b
-                   | CNEQ a b
-                   deriving (Eq, Show, Ord)
-
-type Comp a = CompOrder a a
-
-getCompSides :: CompOrder a b -> (a,b)
-getCompSides (CEQ p q) = (p,q)
-getCompSides (CNEQ p q) = (p,q)
-getCompSides (CST p q) = (p,q)
-getCompSides (CLT p q) = (p,q)
-getCompSides (CLEQ p q) = (p,q)
-getCompSides (CSEQ p q) = (p,q)
-
 mapComp :: (a->e) -> (b->f) -> CompOrder a b -> CompOrder e f
 mapComp f g (CEQ x y) = CEQ (f x) (g y)
 mapComp f g (CNEQ x y) = CNEQ (f x) (g y)
@@ -222,16 +206,6 @@ elemsCompOrder (CSEQ x y) = (x,y)
 elemsCompOrder (CLEQ x y) = (x,y)
 
 
-flipComp :: CompOrder a b -> CompOrder b a
-flipComp x = case x of
-  (CST a b)  -> CLT  b a
-  (CLT a b)  -> CST  b a
-  (CEQ a b)  -> CEQ  b a
-  (CNEQ a b) -> CNEQ b a
-  (CSEQ a b) -> CLEQ b a
-  (CLEQ a b) -> CSEQ b a
-
-
 negateComp :: CompOrder a b -> CompOrder a b
 negateComp x = case x of
   (CST a b) -> CLEQ a b
@@ -265,7 +239,7 @@ splitSelectMap m = foldl f (SMSlice M.empty M.empty) (M.assocs m)
     f (SMSlice a b) (k, SelectColumn cq)      = SMSlice (M.insert k cq a) b
 
 collectCQ :: ParsedWhereClause -> [ColumnQualified]
-collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . getCompSides) $ foldMap (:[]) w
+collectCQ w = concatMap (foldMap (:[])) $ concatMap ((\(a,b)->[a,b]) . sides) $ foldMap (:[]) w
 
 
 data GroupingClause = GroupBy (M.Map ColumnAlias (AggregateFunction ColumnQualified))
@@ -664,12 +638,12 @@ maybeLeftAlign t = f a b
       Just (SS s) -> Just $ compToCompOrder t c $ SS s
       Nothing ->  Nothing
     f x (Read c) = case maybeEvalScalar x of
-      Just (DD d)  -> Just $ compToCompOrder (flipComp t) c $ DD d
-      Just (II i) -> Just $ compToCompOrder (flipComp t) c $ II i
-      Just (SS s) -> Just $ compToCompOrder (flipComp t) c $ SS s
+      Just (DD d)  -> Just $ compToCompOrder (Comp.flip t) c $ DD d
+      Just (II i) -> Just $ compToCompOrder (Comp.flip t) c $ II i
+      Just (SS s) -> Just $ compToCompOrder (Comp.flip t) c $ SS s
       Nothing ->  Nothing
     f _  _ = Nothing
-    (a, b) = getCompSides t
+    (a, b) = sides t
     compToCompOrder :: Comp a -> b -> c -> CompOrder b c
     compToCompOrder (CST _ _) = CST
     compToCompOrder (CLT _ _) = CLT
@@ -826,7 +800,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
           -- we collect column names from the parent WHERE clause and insert them to child SELECT clause
           -- so they are available from the outside
           cMap2  = foldl (\cm (CQ _ (CN cn)) -> M.insert (CA cn) (CN cn) cm) cMap columnsFromJoinClause
-          columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map getCompSides $ collectPosCnfLiterals parentJoin
+          columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals parentJoin
           parentColumns  = M.mapWithKey (\(CA kn) (CQ q _) -> CQ q (CN kn)) columnMap
           parentTableMap = M.insert tAlias child M.empty
           parentJoin     =  joinClause -- maybe rework it?
@@ -857,7 +831,7 @@ processTreeCore (PQT columnMap tableMap whereClause _)
   | (Right tts)           <- subTables,
     (Just joinConditions) <- whereJoin -- ,    Nothing <- groupByClause
     -- here: filter aliases from select and condition and replace them with aliases from subtables.
-  = let columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map getCompSides $ collectPosCnfLiterals joinConditions
+  = let columnsFromJoinClause = concatMap collectReads $ concatMap (\(x,y) -> [x,y]) $ map sides $ collectPosCnfLiterals joinConditions
         columnsForTab :: TableAlias -> [ColumnName]
         columnsForTab ta = mapMaybe (\(CQ t c) -> if t==ta then Just c else Nothing) columnsFromJoinClause
 
@@ -967,7 +941,7 @@ expandEquivalences equivs cnf = newCnf
     maybeRel clause -- when all left sides are the same, no column name on right side.
       | (PosC literals) <- clause,
         xs <- S.elems literals,
-        leftSides <- map (fst . getCompSides) xs,
+        leftSides <- map (fst . sides) xs,
         allTheSame leftSides
         = listToMaybe leftSides
       | otherwise = Nothing
@@ -987,7 +961,7 @@ expandEquivalences equivs cnf = newCnf
     reClause newKey (PosC clause) = PosC $ S.map (mapComp (const newKey) id) clause
 
     newCnf :: PosCNF (CompOrder a SomeScalar)
-    newCnf = foldl (flip cnfAddClause) cnf kk where
+    newCnf = foldl (Prelude.flip cnfAddClause) cnf kk where
       kk = [reClause k2 clause
            | (k1, k2) <- equivalences,
              clause <- Data.Foldable.concat $ M.lookup k1 homogenClausesMap]
