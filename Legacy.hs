@@ -37,7 +37,7 @@ import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT
 
 import CNF(LogicTree(And,Or,Not,Leaf), parseLogicTree, treeToPosCnf, PosCNF, predicates, conjunction, mapPredicates, insertClause, clauses, fromClauses, empty, null)
-import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr, AggregateFn, parseAggregateFn)
+import MathExpr(SomeScalar(DD,II,SS), MathExpr(Sca, Read, Add, Sub, Mul, Div), collect, parseMathExpr, AggregateFn, parseAggregateFn, parseSomeScalar)
 
 import Comp(Comp, CompOrder(CNEQ, CSEQ, CLEQ, CLT, CST, CEQ), sides, flip,elems, parse, parse1, mapSides,mapSides1)
 import Util(PrClj(pr))
@@ -223,12 +223,6 @@ parseSelectMap = M.fromList <$> commaSep1 haskell selectPart
     parseExprWithAlias = parseAsPair parseSelectExpression parseColumnAlias
 
     -- TODO: add parsing aggregate without alias (alias name shall be generated)
-
-parseSomeScalar :: Parser SomeScalar
-parseSomeScalar = s <|> n where
-  s = SS <$> stringLiteral haskell
-  n = do {x <- naturalOrFloat haskell;
-          return (case x of (Left i) -> II i; (Right d) -> DD d)}
 
 
 parseSelectExpression :: Parser SelectExpression
