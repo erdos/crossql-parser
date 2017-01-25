@@ -382,7 +382,7 @@ type ParsedComp = Comp (MathExpr ColumnQualified)
 prepareWhereClauseFlatten
   :: PosCNF ParsedComp
         -> (Maybe (PosCNF ParsedComp), Maybe (PosCNF (CompOrder ColumnQualified SomeScalar)))
-prepareWhereClauseFlatten cnf = case (build bb, build aa) of
+prepareWhereClauseFlatten cnf = case (maybePosCNF bb, maybePosCNF aa) of
   -- if we have conditions to both filter and join and we have an equavalence join condition:
   -- then we create conditions that are implications of the equivalence.
   -- for example:
@@ -394,9 +394,7 @@ prepareWhereClauseFlatten cnf = case (build bb, build aa) of
     make_cnf joinCnf = expandEquivalences (make_eqs joinCnf)
     --- Comp to CompOrder -> MaybeLeftAlign
     -- doClause :: PosClause ParsedComp -> Maybe (PosClause (CompOrder ColumnQualified SomeScalar))
-    doClause clause =  mapM maybeLeftAlign $ clause
-    build xs = if CNF.null xs then Nothing else Just xs
-
+    doClause =  mapM maybeLeftAlign
 
     (aa,bb) = foldl (\(a,b) x -> case doClause x of
                                    Just t  -> (insertClause t a, b);

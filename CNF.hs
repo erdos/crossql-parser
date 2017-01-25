@@ -5,14 +5,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, mapPredicates, CNF.null, predicates) where
+module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, mapPredicates, CNF.null, predicates, maybePosCNF) where
 -- cnf: literal diszjunkciok konjukcioja
 
 import Util
 
-import Control.Applicative ((<$>))
-import Data.Foldable (Foldable, foldMap)
-import Data.Monoid (mappend)
+import Control.Applicative ()
+import Data.Foldable ()
+import Data.Monoid ()
 
 import Data.List (partition)
 import Text.Parsec as TP ((<|>), chainl1, spaces)
@@ -154,3 +154,7 @@ splitClauses f cnf = (fromClauses xs, fromClauses ys) where
 map2Clauses :: (Ord a, Ord b, Ord c) => ([a] -> Either [b] [c]) -> PosCNF a -> (PosCNF b, PosCNF c)
 map2Clauses f cnf = (fromClauses xs, fromClauses ys) where
   (xs, ys) = splitEither f $ clauses cnf
+
+
+maybePosCNF :: (Ord a) => PosCNF a -> Maybe (PosCNF a)
+maybePosCNF xs = if CNF.null xs then Nothing else Just xs
