@@ -15,9 +15,6 @@ import Util
 
 import Control.Monad
 -- import Data.Map.Strict
-import Control.Applicative ((<$>))
-import Data.Foldable (Foldable, foldMap)
-import Data.Monoid (mempty, mappend)
 import Data.Maybe(fromMaybe)
 
 import Text.Parsec as TP ((<|>), chainl1, string, spaces, try)

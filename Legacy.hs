@@ -10,7 +10,6 @@
 
 module Legacy (handleLine) where
 
-
 import Control.Monad
 
 import qualified Data.Set as S
@@ -20,13 +19,10 @@ import qualified Data.Map.Strict as M
     mapWithKey, traverseWithKey, member, alter, null, elems)
 
 import Data.Either()
-import Data.Foldable (concat, foldMap)
+import Data.Foldable (concat)
 import Data.Maybe(listToMaybe, mapMaybe)
 
-import Control.Applicative ((<$>))
-
-import Text.Parsec as TP
-  ((<|>), string,runParser, spaces, try)
+import Text.Parsec as TP((<|>), string,runParser, spaces, try)
 import Text.Parsec.Combinator (optionMaybe)
 
 import Text.Parsec.Language
@@ -175,8 +171,6 @@ parseSelectExpression = try (SelectAggregate <$> parseAggregateFn parseColumnQua
                         <|> (SelectColumn <$> parseColumnQualified)
 
 
--- tryParser "a and not c or b" (parseLogicTree parseColumnName)
-
 parseWhereClause1 :: forall a. Parser a -> Parser (LogicTree (Comp (MathExpr a)))
 parseWhereClause1 p = unfoldLogicTree <$> parseLogicTree (try parse_between <|> (Leaf <$> pc))
   where
@@ -201,7 +195,6 @@ parseWhereClause = parseWhereClause1 parseColumnQualified
 
 parseQuery :: Parser ParsedQueryTree
 parseQuery = try parseSimpleQuery <|> parseAliasedQuery
-
 
 -- todo: parseselectclase -> parseselectmap
 parseAliasedQuery :: Parser ParsedQueryTree
@@ -425,13 +418,6 @@ prepareWhereClause tree = case orderCnfMaybe of
     (mixCnfMaybe , orderCnfMaybe) = prepareWhereClauseFlatten $ treeToPosCnf tree
     convertBack :: PosCNF (CompOrder ColumnQualified SomeScalar) -> PosCNF ParsedComp
     convertBack = mapPredicates (Comp.mapSides Read Sca)
-
-
-mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
-mapAssoc2 k1 k2 v m = case M.lookup k1 m of
-  Nothing -> M.insert k1 (M.insert k2 v M.empty) m
-  Just m2 -> M.insert k1 (M.insert k2 v m2)      m
-
 
 data ProcessError = PE String deriving (Eq, Show, Ord)
 

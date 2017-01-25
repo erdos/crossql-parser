@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -87,3 +87,8 @@ allTheSame :: (Eq a) => [a] -> Bool
 allTheSame [] = True
 allTheSame [_] = True
 allTheSame (x:xs) = all (== x) xs
+
+mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Map b c)
+mapAssoc2 k1 k2 v m = case M.lookup k1 m of
+  Nothing -> M.insert k1 (M.insert k2 v M.empty) m
+  Just m2 -> M.insert k1 (M.insert k2 v m2)      m

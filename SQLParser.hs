@@ -18,7 +18,6 @@ import Text.Parsec.Token as TPT (commaSep1, parens)
 -- import Control.Monad
 --import Data.Char(toUpper)
 
-import Control.Applicative ((<$>))
 import Data.Maybe ()
 
 
