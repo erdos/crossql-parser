@@ -317,8 +317,6 @@ parseSimpleQuery =
     parseSelect :: Parser [(ColumnAlias, ColumnName)]
     parseSelect = commaSep1 haskell part
 
-
-
     toWhereClause :: TableAlias -> LogicTree (Comp (MathExpr ColumnName)) -> ParsedWhereClause
     toWhereClause t = fmap $ Comp.mapSides1 $ fmap $ CQ t
 
@@ -381,8 +379,7 @@ splitPosCnfCompOrder pcnf = (common, spec)
 
     -- RETURN TableAlias when all literal share the same.
     maybeHomogenClause :: [CompOrder ColumnQualified SomeScalar] -> Maybe TableAlias
-    maybeHomogenClause xs =
-      maybeAllMapToSame ((\(CQ c _) -> c) . fst . elems) xs
+    maybeHomogenClause = maybeAllMapToSame $ (\(CQ c _) -> c) . fst . elems
 
 
 type ParsedComp = Comp (MathExpr ColumnQualified)
