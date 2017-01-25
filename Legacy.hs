@@ -625,15 +625,11 @@ expandEquivalences :: forall a . (Eq a, Ord a) =>
 expandEquivalences equivs cnf = newCnf
   where
 
-    clauses2 :: [[CompOrder a SomeScalar]]
-    clauses2 = CNF.clauses cnf
-
-    equivalences :: [(a,a)]
-    equivalences = spanEquations equivs -- equivs ++ map swap equivs
+    equivalences = spanEquations equivs :: [(a,a)]
 
       -- decides if this clause should be extended to other relations
     maybeRel :: [CompOrder a SomeScalar] -> Maybe a
-    maybeRel xs -- when all left sides are the same, no column name on right side.
+    maybeRel xs
       | leftSides <- map (fst . sides) xs,
         allTheSame leftSides
         = listToMaybe leftSides
@@ -641,7 +637,7 @@ expandEquivalences equivs cnf = newCnf
 
         -- maps to clauses that only have key on left side (and no column on right)
     homogenClausesMap :: M.Map a [[CompOrder a SomeScalar]]
-    homogenClausesMap = foldl rf M.empty clauses2 where
+    homogenClausesMap = foldl rf M.empty (CNF.clauses cnf) where
       -- rf :: M.Map a (PosClause (CompOrder a SomeScalar))
       rf m clause = case maybeRel clause of
         Nothing -> m
@@ -658,11 +654,6 @@ expandEquivalences equivs cnf = newCnf
       kk = [reClause k2 clause
            | (k1, k2) <- equivalences,
              clause <- Data.Foldable.concat $ M.lookup k1 homogenClausesMap]
-
-    allTheSame :: [a] -> Bool
-    allTheSame [] = True
-    allTheSame [_] = True
-    allTheSame (x:xs) = all (== x) xs
 
 handleLine :: String -> String
 handleLine line =

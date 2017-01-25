@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -82,3 +82,8 @@ groupMapBy f = foldl (\a x->  (M.insertWith (++) (f x) [x] a)) M.empty
 maybeAllMapToSame :: (Eq k) => (a->k) -> [a] -> Maybe k
 maybeAllMapToSame _ [] = Nothing
 maybeAllMapToSame f (x : xs) = if all ((== f x) . f) xs then Just (f x) else Nothing
+
+allTheSame :: (Eq a) => [a] -> Bool
+allTheSame [] = True
+allTheSame [_] = True
+allTheSame (x:xs) = all (== x) xs
