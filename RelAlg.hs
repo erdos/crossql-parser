@@ -13,6 +13,8 @@ module RelAlg (RelAlg, transform, normalize, simplify, ExecPlan, placeholder) wh
 --import Data.List (group, nub)
 import Data.Map.Strict as Map (Map, fromList, union, keys,member)
 import Data.Maybe
+import Data.List
+import Data.Either
 
 import SQLParser
 import CNF
@@ -91,10 +93,22 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
        -> (TableReference, Maybe JoinCond)
        -> (RelAlg, SelectClause, MixWhereClauseCNF)
     -- TODO: ennek a feladata a join-t is megcsinalni.
-    rf (ra, sc, mwc) ((tabNameOrSubQ, maybeTableAlias), mJoinCond) = undefined (ra, sc, mwc)
+    rf (leftRA, sc, mwc) (subQuery, mJoinCond)
+      = (join leftRA rightRA mJoinCond, sc2, mwc2)
+      where (rightRA, sc2, mwc2) = consumeTransform (sc, mwc) subQuery
+
+    join :: RelAlg -> RelAlg -> (Maybe JoinCond) -> RelAlg
+    join leftRA rightRA Nothing = Joins (NaturalJoin [] leftRA rightRA)
+    join leftRA rightRA (Just jc) = optionalSel $ natJoin where
+      natJoin = Joins (NaturalJoin eqs leftRA rightRA)
+      optionalSel = if otherClauses == [] then id else (Sel (fromClauses otherClauses))
+      cnf = treeToPosCnf jc :: PosCNF (Comp (MathExpr ColumnName))
+      (eqs, otherClauses) = partitionEithers
+                            $ [(case x of [CEQ (Read a) (Read b)] -> Left (a, b)
+                                          _ -> Right x) | x <- (clauses cnf)]
+
+
     -- TODO: call consumeTransform here.
-
-
 
     -- try
     consumeTransform :: (SelectClause, MixWhereClauseCNF)
