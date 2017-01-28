@@ -10,13 +10,13 @@ import Util
 
 import Text.Parsec as TP ((<|>), string, spaces, sepBy1, try, runParser, chainl1)
 import Text.Parsec.Combinator (between, optionMaybe)
--- import Text.Parsec.Error (Message(..), errorMessages)
 import Text.Parsec.Language (haskell)
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT (commaSep1, parens)
 
--- import Control.Monad --import Data.Char(toUpper)
 import Data.Maybe ()
+
+-- import Text.Parsec.Error (Message(..), errorMessages) Control.Monad Data.Char(toUpper)
 
 type TableName = String
 type TableAlias = String

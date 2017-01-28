@@ -9,12 +9,11 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr) where
+module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, renderMathExpr) where
 
 import Util
 
 import Control.Monad
--- import Data.Map.Strict
 import Data.Maybe(fromMaybe)
 
 import Text.Parsec as TP ((<|>), chainl1, string, spaces, try)
@@ -24,14 +23,23 @@ import Text.Parsec.Token as TPT
 
 data SomeScalar = DD Double | II Integer | SS String deriving (Eq, Show, Ord)
 
+data AggregateFn a = Avg a | Cnt a | Max a | Min a | Sum a
+  deriving (Eq, Show, Ord, Functor)
+
+data MathExpr a = Sca SomeScalar
+                | Read a
+                | Add (MathExpr a) (MathExpr a)
+                | Sub (MathExpr a) (MathExpr a)
+                | Mul (MathExpr a) (MathExpr a)
+                | Div (MathExpr a) (MathExpr a)
+                | FnCall (AggregateFn a)
+                deriving (Eq, Show, Ord, Functor)
+
 parseSomeScalar :: Parser SomeScalar
 parseSomeScalar = s <|> n where
   s = SS <$> stringLiteral haskell
   n = do {x <- naturalOrFloat haskell;
           return (case x of (Left i) -> II i; (Right d) -> DD d)}
-
-data AggregateFn a = Avg a | Cnt a | Max a | Min a | Sum a
-  deriving (Eq, Show, Ord, Functor)
 
 arg1 :: AggregateFn a -> a
 arg1 (Avg x) = x
@@ -58,16 +66,6 @@ parseAggregateFn p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM"
     x <- p;
     spaces; _<-string ")";
     return $ f x
-
-
-data MathExpr a = Sca SomeScalar
-                | Read a
-                | Add (MathExpr a) (MathExpr a)
-                | Sub (MathExpr a) (MathExpr a)
-                | Mul (MathExpr a) (MathExpr a)
-                | Div (MathExpr a) (MathExpr a)
-                | FnCall (AggregateFn a)
-                deriving (Eq, Show, Ord, Functor)
 
 instance Foldable MathExpr where
   foldMap f (Read x) = f x
@@ -141,3 +139,21 @@ simplifyMathExpr expr = case expr of
     op _ _ f (Sca (DD d)) (Sca (SS s)) = liftM (Sca . SS) $ f (show d) s
     op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
     op _ _ _ _ _ = Nothing
+
+
+-- TODO: also use precendences and associativity!
+renderMathExpr :: MathExpr String -> String
+renderMathExpr (Read s) = s
+renderMathExpr (Sca (SS s)) =   "\"" ++ s ++ "\""
+renderMathExpr (Sca (II i)) = show i
+renderMathExpr (Sca (DD d)) = show d
+renderMathExpr (Add a b) = "(" ++ renderMathExpr a ++ ")+(" ++ renderMathExpr b ++ ")"
+renderMathExpr (Sub a b) = "(" ++ renderMathExpr a ++ ")-(" ++ renderMathExpr b ++ ")"
+renderMathExpr (Mul a b) = "(" ++ renderMathExpr a ++ ")*(" ++ renderMathExpr b ++ ")"
+renderMathExpr (Div a b) = "(" ++ renderMathExpr a ++ ")/(" ++ renderMathExpr b ++ ")"
+
+renderMathExpr (FnCall (Sum c)) = "SUM(" ++ c ++ ")"
+renderMathExpr (FnCall (Avg c)) = "AVG(" ++ c ++ ")"
+renderMathExpr (FnCall (Cnt c)) = "CNT(" ++ c ++ ")"
+renderMathExpr (FnCall (Min c)) = "SIN(" ++ c ++ ")"
+renderMathExpr (FnCall (Max c)) = "SAX(" ++ c ++ ")"

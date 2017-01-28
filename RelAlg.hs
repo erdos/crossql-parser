@@ -93,7 +93,7 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
        -> (TableReference, Maybe JoinCond)
        -> (RelAlg, SelectClause, MixWhereClauseCNF)
     -- TODO: ennek a feladata a join-t is megcsinalni.
-    rf (ra, sc, mwc) (trm, mjc) = (ra, sc, mwc)
+    rf (ra, sc, mwc) ((tabNameOrSubQ, maybeTableAlias), mJoinCond) = undefined (ra, sc, mwc)
     -- TODO: call consumeTransform here.
 
     -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
