@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnName, ColumnAlias, ColumnMath, TableName, TableAlias, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery) where
+module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnName, ColumnAlias, ColumnMath, TableName, TableAlias, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference) where
 
 import CNF
 import MathExpr
@@ -15,11 +15,8 @@ import Text.Parsec.Language (haskell)
 import Text.Parsec.String as TPS
 import Text.Parsec.Token as TPT (commaSep1, parens)
 
--- import Control.Monad
---import Data.Char(toUpper)
-
+-- import Control.Monad --import Data.Char(toUpper)
 import Data.Maybe ()
-
 
 type TableName = String
 type TableAlias = String
@@ -27,6 +24,26 @@ type TableAlias = String
 type ColumnName = String
 type ColumnAlias = String
 type ColumnMath = MathExpr ColumnAlias -- sum(1), etc.
+
+type TableReference = (Either TableName SubQuery, Maybe TableAlias)
+
+type JoinCond = (LogicTree (Comp (MathExpr ColumnName)))
+type JoinedTable = (TableReference, [(TableReference,  Maybe JoinCond)])
+
+type FromClause = JoinedTable
+type SubQuery = QuerySpec
+
+type WhereClause = LogicTree (CompOrder ColumnName (MathExpr ColumnName))
+type GroupByClause = [ColumnAlias]
+type HavingClause = LogicTree (CompOrder (AggregateFn ColumnAlias) SomeScalar)
+type SelectClause = [(ColumnMath, Maybe ColumnAlias)]
+
+data QuerySpec -- root
+  = SFW SelectClause FromClause WhereClause
+  | SFWG SelectClause FromClause WhereClause GroupByClause
+  | SFWGH SelectClause FromClause WhereClause GroupByClause HavingClause
+  deriving (Eq, Ord, Show)
+
 
 parseColumnAlias :: Parser ColumnAlias
 parseColumnAlias = parseIdentifier
@@ -40,14 +57,10 @@ parseTableAlias = parseIdentifier
 parseTableName :: Parser TableName
 parseTableName = parseIdentifier
 
-
-
 -- ha subquery -> zarojelben van.
-type TableReference = (Either TableName SubQuery, Maybe TableAlias)
 
 parseTableReference :: Parser TableReference
-parseTableReference
-  =
+parseTableReference =
   do
     -- _<- spaces;
     _ <- string "("
@@ -67,28 +80,15 @@ parseTableReference
         spaces;
         parseTableAlias
 
--- zarojel subquery (with opt order by) zarojel
-  -- sth with optional as
-
--- a szokozokkel meg meg fogok szenvedni.
-
-type JoinCond = (LogicTree (Comp (MathExpr ColumnName)))
-
-type JoinedTable = (TableReference,
-                    [(TableReference,  Maybe JoinCond)])
-
---
-
 flattenJoin :: [(TableReference, Maybe (TableReference, JoinCond))]
             -> Maybe JoinedTable
 flattenJoin [] = Nothing
-flattenJoin ((tr, a) : xs) = Just (tr, rest)
-  where
-    rest = reverse $ foldl fr (ini a) xs
-    fr ys (gg, Nothing) = (gg, Nothing) : ys
-    fr ys (gg, Just (p, q)) =  (p, Just q) : (gg, Nothing) : ys
-    ini Nothing = []
-    ini (Just (t, c)) = [(t, Just c)]
+flattenJoin ((tr, a) : xs) = Just (tr, rest) where
+  rest = reverse $ foldl fr (ini a) xs
+  fr ys (gg, Nothing) = (gg, Nothing) : ys
+  fr ys (gg, Just (p, q)) =  (p, Just q) : (gg, Nothing) : ys
+  ini Nothing = []
+  ini (Just (t, c)) = [(t, Just c)]
 
 parseJoinedTable :: Parser JoinedTable
 parseJoinedTable = do
@@ -114,42 +114,21 @@ parseJoinedTable = do
       return (tr, eff)
 
 -- TODO: ide johetnek a halmazmuveletek is!
-type SubQuery = QuerySpec
 
 parseSubQuery :: Parser SubQuery
 parseSubQuery = between (string "(") (string ")") parseSubQuery <|> parseQuerySpec
 
 
 -- ;; JOIN t r ON expr JOIN t r ON expr JOIN t r ON expr
-
   -- https://docs.oracle.com/cd/B14156_01/doc/B13812/html/sqcmd.htm#i1009110
-
-type FromClause = JoinedTable
 
   -- TODO: write parsed parser for these types.
 
 parseFromClause :: Parser FromClause
 parseFromClause = parseJoinedTable
 
-
-type WhereClause = LogicTree (CompOrder ColumnName (MathExpr ColumnName))
-
-type GroupByClause = [ColumnAlias]
-
-type HavingClause = LogicTree (CompOrder (AggregateFn ColumnAlias) SomeScalar)
-
-data QuerySpec -- root
-  = SFW SelectClause FromClause WhereClause
-  | SFWG SelectClause FromClause WhereClause GroupByClause
-  | SFWGH SelectClause FromClause WhereClause GroupByClause HavingClause
-  deriving (Eq, Ord, Show)
-
 parseWhereClause :: Parser WhereClause;
 parseWhereClause = SQLParser.parseLogicTree parseColumnName (parseMathExpr parseColumnName)
-
-type SelectClause = [(ColumnMath, Maybe ColumnAlias)]
---  TODO: add join here also.
--- vesszovel elvalasztva.
 
 -- do add spaces too
 commasep1 :: Parser t -> Parser [t]
