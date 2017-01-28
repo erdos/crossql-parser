@@ -55,36 +55,34 @@ transform :: QuerySpec -> RelAlg
 transform (SFW selectC ((src, mTableAlias), []) whereC)
   =  Proj projMapRestricted $ Sel selCond $ Proj (Map.union projMap projMapAll) $ source
   where
-
-    source = case src of
-               Left tableName -> From tableName
-               Right subQuery -> transform subQuery
+    source = case src of Left tableName -> From tableName
+                         Right subQuery -> transform subQuery
 
     -- TODO: optionally use mTableAlias and tableName to de-qualify col name symbols.
     -- tableAlias = fromMaybe tableName mTableAlias
     -- TODO: resolve them by aliases from select clause!!
     colsWhereClause :: [ColumnName]
-    colsWhereClause = concat $ map (\(a,b) -> a:collect b) $ map sides $ predicates whereClausePosCNF
-
+    colsWhereClause = concatMap (\(a,b) -> a:collect b) $ map sides $ predicates whereClausePosCNF
     -- column names from select expressions
     colsSelectClause :: [ColumnName]
     colsSelectClause = concatMap (collect . fst) selectC
 
-    projMapRestricted = Map.fromList $ map (\k -> (k,Read k)) $ Map.keys projMap
-    -- a select clause atirasa. TODO: ?? kicserelese renderelt math expr string reprezentaciojara
-    projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe "??" mCA, cm)) selectC
+    projMapRestricted = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
+    projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (renderMathExpr cm) mCA, cm)) selectC
 
     -- az osszes oszlopnev benne van - IDENTITAS
-    projMapAll = Map.fromList $ map (\x -> (x,Read x)) $ colsWhereClause ++ colsSelectClause
+    projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
 
-    whereClausePosCNF = treeToPosCnf whereC ::  PosCNF (CompOrder ColumnName (MathExpr ColumnName))
-
+    whereClausePosCNF = treeToPosCnf whereC :: PosCNF (CompOrder ColumnName (MathExpr ColumnName))
     -- TODO: optionally replace column names with aliases from projMap
     selCond = mapPredicates (mapSides Read id) whereClausePosCNF
 
 transform (SFW selectC (t1, xs) whereC) | xs /= []
   = Sel (undefined selX) $ Proj (undefined whereX) $ resultX
   where
+    -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
+    (resultX, selX, whereX) = foldl rf (ra, sel2, where2) xs
+
     whereCNF :: MixWhereClauseCNF
     whereCNF = mapPredicates (mapSides Read id) $ treeToPosCnf whereC
     (ra, sel2, where2) = consumeTransform (selectC, whereCNF) t1
@@ -96,8 +94,6 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
     rf (ra, sc, mwc) ((tabNameOrSubQ, maybeTableAlias), mJoinCond) = undefined (ra, sc, mwc)
     -- TODO: call consumeTransform here.
 
-    -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
-    (resultX, selX, whereX) = foldl rf (ra, sel2, where2) xs
 
 
     -- try
