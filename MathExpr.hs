@@ -142,10 +142,14 @@ simplifyMathExpr expr = case expr of
     op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
     op _ _ _ _ _ = Nothing
 
+renderTabColName :: TabColName -> String
+renderTabColName (TCN Nothing (CN s)) = s
+renderTabColName (TCN (Just (TN t)) (CN c)) = t ++ "." ++ c
 
 -- TODO: also use precendences and associativity!
-renderMathExpr :: MathExpr ColumnName -> String
-renderMathExpr (Read (CN s)) = s
+renderMathExpr :: MathExpr TabColName -> String
+renderMathExpr (Read tcn) = renderTabColName tcn
+
 renderMathExpr (Sca (SS s)) =   "\"" ++ s ++ "\""
 renderMathExpr (Sca (II i)) = show i
 renderMathExpr (Sca (DD d)) = show d
@@ -154,11 +158,11 @@ renderMathExpr (Sub a b) = "(" ++ renderMathExpr a ++ ")-(" ++ renderMathExpr b 
 renderMathExpr (Mul a b) = "(" ++ renderMathExpr a ++ ")*(" ++ renderMathExpr b ++ ")"
 renderMathExpr (Div a b) = "(" ++ renderMathExpr a ++ ")/(" ++ renderMathExpr b ++ ")"
 
-renderMathExpr (FnCall (Sum (CN c))) = "SUM(" ++ c ++ ")"
-renderMathExpr (FnCall (Avg (CN c))) = "AVG(" ++ c ++ ")"
-renderMathExpr (FnCall (Cnt (CN c))) = "CNT(" ++ c ++ ")"
-renderMathExpr (FnCall (Min (CN c))) = "SIN(" ++ c ++ ")"
-renderMathExpr (FnCall (Max (CN c))) = "SAX(" ++ c ++ ")"
+renderMathExpr (FnCall (Sum c)) = "SUM(" ++ renderTabColName c ++ ")"
+renderMathExpr (FnCall (Avg c)) = "AVG(" ++ renderTabColName c ++ ")"
+renderMathExpr (FnCall (Cnt c)) = "CNT(" ++ renderTabColName c ++ ")"
+renderMathExpr (FnCall (Min c)) = "SIN(" ++ renderTabColName c ++ ")"
+renderMathExpr (FnCall (Max c)) = "SAX(" ++ renderTabColName c ++ ")"
 
 
 --mapMonadMathExpr :: (Monad m) => (a -> m b) -> (MathExpr a) -> m (MathExpr b)

@@ -9,10 +9,9 @@
 
 module RelAlg (RelAlg, transform, placeholder) where
 
-import Data.Map.Strict as Map (Map, fromList, union, keys,member)
+import Data.Map.Strict as Map (Map, fromList, union, keys)
 import Data.Maybe
 import Data.Either
-import Data.List
 
 import Util
 import SQLParser
@@ -20,7 +19,7 @@ import CNF
 import Comp
 import MathExpr
 
-type MixWhereClauseCNF = PosCNF (Comp (MathExpr ColumnName))
+type MixWhereClauseCNF = PosCNF (Comp (MathExpr TabColName))
 
 -- TODO: later impl other joins
 data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner join
@@ -35,32 +34,41 @@ data RelAlg = From [ColumnName] TableName
             | Aggr (Map ColumnName (AggregateFn TabColName)) [TabColName] RelAlg
             deriving (Eq, Ord, Show)
 
-{-
-hasColName :: ColumnName -> RelAlg -> Bool
-hasColName c (From cns _) = elem c cns
-hasColName c (Proj _ t)= or [undefined c, hasColName c t]
-hasColName c (Aggr m cns _) = or [member c m, elem c cns]
-hasColName _ _ = undefined
--}
+
+getTableName :: RelAlg -> Maybe TableName
+getTableName (From _ tn) = Just tn
+getTableName (Joins _) = Nothing
+getTableName (Sel _ a) = getTableName a
+getTableName (Proj _ a) = getTableName a
+getTableName (Aggr _ _ a) = getTableName a
 
 join :: RelAlg -> RelAlg -> (Maybe JoinCond) -> RelAlg
 join leftRA rightRA Nothing = Joins (NaturalJoin [] leftRA rightRA)
 join leftRA rightRA (Just jc) = optionalSel $ natJoin where
+  (leftT, rightT) = (getTableName leftRA, getTableName rightRA)
   natJoin = Joins (NaturalJoin eqs leftRA rightRA)
-  optionalSel = if otherClauses == [] then id else (Sel (fromClauses otherClauses))
-  cnf = treeToPosCnf jc :: PosCNF (Comp (MathExpr ColumnName))
-  (eqs, otherClauses) = partitionEithers
-                        [(case x of
-                             [CEQ (Read a) (Read b)] -> Left (a, b)
-                             _ -> Right x)
-                          | x <- (clauses cnf)]
+  optionalSel = if otherClauses == [] then id else (Sel $ fromClauses otherClauses)
+
+  -- FIXME: kesobb kiegesziteni, h magatol megtalalja mely kifejezes mely fahoz tartozik.
+  pf [CEQ (Read (TCN (Just t1) a)) (Read (TCN (Just t2) b))]
+    | (Just tc1) <- leftT, t1 == tc1
+    , (Just tc2) <- rightT, t2 == tc2
+    = Left (a, b)
+  pf [CEQ (Read (TCN (Just t1) a)) (Read (TCN (Just t2) b))]
+    | (Just tc1) <- leftT, t2 == tc1
+    , (Just tc2) <- rightT, t1 == tc2
+    = Left (b, a)
+  pf x = Right x
+
+  otherClauses :: [[Comp (MathExpr TabColName)]]
+  (eqs, otherClauses) = partitionEithers $ map pf $ clauses $ treeToPosCnf jc
 
 -- TODO: nem jo, ha az oszlopnev idezojelek kozt van, vagy matekos kifejezes tizedesponttal
-columnGetTable :: ColumnName -> Maybe (TableName, ColumnName)
-columnGetTable (CN cn) = case elemIndex '.' cn of
-  Nothing -> Nothing
-  Just i -> let (tns, cns) = splitAt i cn in
-    Just $ (TN tns, CN cns)
+--columnGetTable :: ColumnName -> Maybe (TableName, ColumnName)
+--columnGetTable (CN cn) = case elemIndex '.' cn of
+--  Nothing -> Nothing
+--  Just i -> let (tns, cns) = splitAt i cn in
+--    Just $ (TN tns, CN cns)
 
 -- levalogatja a relevans select/where klozokat
 -- keszit belole egy kifejezest
@@ -70,21 +78,24 @@ consumeJoin :: (SelectClause, MixWhereClauseCNF)
                  -> (RelAlg, SelectClause, MixWhereClauseCNF)
 consumeJoin x (Left tn, Nothing) = consumeJoin x (Left tn, Just tn) -- get defanult table name alias
 
-consumeJoin (sc, whereCNF) (Left tn, Just ta)
+consumeJoin (sc, whereCNF) (Left tn, Just _) -- FIXME: second arg is table alias, should be used here.
   = (relAlg, selectRem, fromClauses whereRemClauses) where
   relAlg = Proj projMapIdentity
            $ Sel selCond
            $ Proj (Map.union projMap projMapAll)
-           $ From (colsWhereClause ++ colsSelectClause) tn
+           $ From fromColList tn
 
   -- copy from other.
-  projMapIdentity = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
+  projMapIdentity = Map.fromList $ map (\k -> (k, Read (TCN Nothing k))) $ Map.keys projMap
   selCond = fromClauses whereClauses
-  projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (CN (renderMathExpr cm)) mCA, cm)) selectRem
-  projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
-  colsWhereClause =  concatMap (\(a,b) -> collect a ++ collect b) $  concatMap (map sides) $ whereRemClauses
-  colsSelectClause = concatMap (collect . fst) selectC
+  projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectRem]
+  projMapAll = Map.fromList $ map (\t@(TCN _ c) -> (c, Read t)) $ colsWhereClause ++ colsSelectClause
+
+  colsWhereClause =  concatMap (\(a,b) -> collect a ++ collect b) $  concatMap (map sides) $ whereRemClauses :: [TabColName]
+  colsSelectClause = concatMap (collect . fst) selectC :: [TabColName]
   -- end of close
+
+  fromColList = [c | (TCN _ c) <- colsWhereClause ++ colsSelectClause] :: [ColumnName]
 
   -- szetvalogatja az alapjan, hogy a klozon belul minden elem egy tablahoz tartozik v sem
   (whereClauses, whereRemClauses) = partitionEithers $ map wherePart $ clauses whereCNF
@@ -106,10 +117,11 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta)
     Just mmm -> Right (mmm, mca)
     Nothing -> Left (cm, mca)
 
-  maybeGoodColumn :: ColumnName -> Maybe ColumnName
-  maybeGoodColumn a = case columnGetTable a of
-    Nothing -> Nothing
-    Just (t, c) -> if (t == ta) then Just c else Nothing
+  -- TODO: megnezni, h kell-e melyebb strategia.
+  maybeGoodColumn :: TabColName -> Maybe TabColName
+  maybeGoodColumn a@(TCN (Just t) _) | t == tn = Just a
+  maybeGoodColumn (TCN Nothing _) = undefined -- megnezni h kell-e melyebb strategia.
+  maybeGoodColumn _ = Nothing
 
 
 consumeJoin _ _ = undefined
@@ -121,6 +133,33 @@ consumeJoin _ _ = undefined
 -- whereClause: LogicTree (CompOrder CN (MathExpr CN))
 transform :: QuerySpec -> RelAlg
 
+transform (SFW selectC ((Left tableName, _), []) whereC)
+  = Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ From allColNames tableName
+  where
+    -- tableAlias = fromMaybe tableName mTableAlias
+
+    -- az osszes oszlopnev SELECT valtozok + WHERE kifejezesekbol
+    allColNames :: [ColumnName] -- FIXME: itt leelenorizni, hogy minden tnev nothing vagy just tableAlias !!!
+    -- TODO: maybe dedup!
+    allColNames = [cn | (TCN _ cn) <- concatMap (collect . fst) selectC]
+                  ++ [cn | (s1, s2) <- map sides $ predicates whereCNF
+                         , (TCN _ cn) <- s1 : collect s2] -- TODO: finish
+
+    -- projMap = undefined
+    projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectC]
+
+
+    -- a select klozbol eloallitunk egy identitast.
+    projMapIdentity = Map.fromList [ (colName, Read (TCN Nothing colName)) | colName <- Map.keys projMap]
+
+    -- a where klzobol jon
+    selCond = mapPredicates (mapSides Read id) whereCNF
+
+
+    whereCNF = treeToPosCnf whereC
+    projMapAll = Map.fromList [(cn, Read (TCN Nothing cn)) | cn <- allColNames]
+
+{-
 -- JOIN nelkuli tablak kezelese, ez is kell es elvileg jo strategia.
 transform (SFW selectC ((src, _), []) whereC)
   =  Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ source
@@ -144,15 +183,13 @@ transform (SFW selectC ((src, _), []) whereC)
     whereClausePosCNF = treeToPosCnf whereC :: PosCNF (CompOrder ColumnName (MathExpr ColumnName))
     -- TODO: optionally replace column names with aliases from projMap
     selCond = mapPredicates (mapSides Read id) whereClausePosCNF
-
+-}
 
 transform (SFW selectC (t1, xs) whereC) | xs /= []
   = Sel selection $ Proj projection $ resultX
   where
-
     projection = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mca, cm) | (cm, mca) <- selX]
 
-    -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
     (resultX, selX, selection) = foldl rf (ra, sel2, where2) xs
 
     whereCNF = mapPredicates (mapSides Read id) $ treeToPosCnf whereC :: MixWhereClauseCNF
@@ -161,7 +198,6 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
     rf :: (RelAlg, SelectClause, MixWhereClauseCNF)
        -> (TableReference, Maybe JoinCond)
        -> (RelAlg, SelectClause, MixWhereClauseCNF)
-    -- TODO: ennek a feladata a join-t is megcsinalni.
     rf (leftRA, sc, mwc) (subQuery, mJoinCond)
       = (join leftRA rightRA mJoinCond, sc2, mwc2)
       where (rightRA, sc2, mwc2) = consumeJoin (sc, mwc) subQuery

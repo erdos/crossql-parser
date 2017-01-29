@@ -39,7 +39,6 @@ instance (PrClj a, PrClj b) => PrClj (CompOrder a b) where
   pr (CLT a b) = "(> " ++ pr a ++ " " ++ pr b ++")"
   pr (CST a b) = "(< " ++ pr a ++ " " ++ pr b ++")"
 
-
 sides :: CompOrder a b -> (a,b)
 sides (CEQ p q) = (p,q)
 sides (CNEQ p q) = (p,q)

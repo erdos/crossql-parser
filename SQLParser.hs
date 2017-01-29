@@ -25,13 +25,13 @@ type ColumnMath = MathExpr TabColName -- sum(1), etc.
 
 type TableReference = (Either TableName SubQuery, Maybe TableName)
 
-type JoinCond = (LogicTree (Comp (MathExpr ColumnName)))
+type JoinCond = (LogicTree (Comp (MathExpr TabColName)))
 type JoinedTable = (TableReference, [(TableReference,  Maybe JoinCond)])
 
 type FromClause = JoinedTable
 type SubQuery = QuerySpec
 
-type WhereClause = LogicTree (CompOrder ColumnName (MathExpr ColumnName))
+type WhereClause = LogicTree (CompOrder TabColName (MathExpr TabColName))
 type GroupByClause = [ColumnName]
 type HavingClause = LogicTree (CompOrder (AggregateFn ColumnName) SomeScalar)
 type SelectClause = [(ColumnMath, Maybe ColumnName)]
@@ -96,6 +96,9 @@ flattenJoin ((tr, a) : xs) = Just (tr, rest) where
   ini Nothing = []
   ini (Just (t, c)) = [(t, Just c)]
 
+parseMixTabColTree :: Parser (LogicTree (Comp (MathExpr (TabColName))))
+parseMixTabColTree = CNF.parseLogicTree $ Comp.parse1 $ parseMathExpr parseTabColName
+
 parseJoinedTable :: Parser JoinedTable
 parseJoinedTable = do
   cs <- commasep1 parseOne
@@ -116,7 +119,7 @@ parseJoinedTable = do
       spaces
       _ <- stringI "ON"
       spaces
-      eff <- CNF.parseLogicTree (Comp.parse1 (parseMathExpr parseColumnName))
+      eff <- parseMixTabColTree
       return (tr, eff)
 
 -- TODO: ide johetnek a halmazmuveletek is!
@@ -134,7 +137,7 @@ parseFromClause :: Parser FromClause
 parseFromClause = parseJoinedTable
 
 parseWhereClause :: Parser WhereClause;
-parseWhereClause = SQLParser.parseLogicTree parseColumnName (parseMathExpr parseColumnName)
+parseWhereClause = SQLParser.parseLogicTree parseTabColName (parseMathExpr parseTabColName)
 
 -- do add spaces too
 commasep1 :: Parser t -> Parser [t]

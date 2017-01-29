@@ -77,7 +77,7 @@ parseIdentifier = idBacktick <|> id1
       return s}
     id1 = do {
       firstChar <- letter <|> oneOf "_$";
-      restChar <- many (alphaNum <|> oneOf "_:$.");
+      restChar <- many (alphaNum <|> oneOf "_:$");
       return $ firstChar : restChar}
 
 splitEither :: (a -> Either b c) -> [a] -> ([b], [c])
