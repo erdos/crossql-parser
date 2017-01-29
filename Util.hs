@@ -2,7 +2,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2, maybeTuple, ColumnName(CN), TableName(TN)) where
+module Util (PrClj(pr),
+             Negateable(negative),
+             stringI, parseIdentifier,
+             splitEither, maybeAll, maybeAllMapToSame, maybeTuple,
+             groupMapBy,  allTheSame, mapAssoc2,
+             ColumnName(CN), TableName(TN), TabColName(TCN)) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -15,7 +20,7 @@ import Text.Parsec.String as TPS
 
 data TableName = TN String deriving (Eq, Show, Ord)
 data ColumnName = CN String deriving (Eq, Show, Ord)
-
+data TabColName = TCN (Maybe TableName) String deriving (Eq, Show, Ord)
 
 
 class PrClj a where

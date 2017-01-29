@@ -27,7 +27,7 @@ type MixWhereClauseCNF = PosCNF (Comp (MathExpr ColumnName))
 data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner join
           deriving (Eq, Ord, Show)
 
-data RelAlg = From TableName
+data RelAlg = From [ColumnName] TableName
             | Joins JS
             | Sel  SelCond RelAlg
             -- normalize step shall turn Sel to CleanSel where possible
@@ -38,7 +38,7 @@ data RelAlg = From TableName
 
 
 hasColName :: ColumnName -> RelAlg -> Bool
-hasColName _ (From _) = False
+hasColName c (From cns _) = elem c cns
 hasColName c (Proj _ t)= or [undefined c, hasColName c t]
 hasColName c (Aggr m cns _) = or [member c m, elem c cns]
 hasColName _ _ = undefined
@@ -76,7 +76,7 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta)
   relAlg = Proj projMapIdentity
            $ Sel selCond
            $ Proj (Map.union projMap projMapAll)
-           $ From tn
+           $ From (colsWhereClause ++ colsSelectClause) tn
 
   -- copy from other.
   projMapIdentity = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
@@ -126,7 +126,7 @@ transform :: QuerySpec -> RelAlg
 transform (SFW selectC ((src, _), []) whereC)
   =  Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ source
   where
-    source = case src of Left tableName -> From tableName
+    source = case src of Left tableName -> From (colsWhereClause ++ colsSelectClause) tableName
                          Right subQuery -> transform subQuery
 
     -- TODO: optionally use mTableAlias and tableName to de-qualify col name symbols.
@@ -193,7 +193,7 @@ placeholder :: undefined
 placeholder = undefined hasColName
 
 instance PrClj RelAlg where
-  pr (From (TN c)) = "{:table \"" ++ c ++ "\"}"
+  pr (From cs (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ "}"
   pr (Sel sc r) = "{:select " ++ pr sc ++ ", :src " ++ pr r ++ "}"
   pr (Proj pp r) = "{:project " ++ pr pp ++ ", :src " ++ pr r ++ "}"
   pr _ = "??"
