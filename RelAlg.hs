@@ -109,10 +109,7 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses 
     Just (t, c) -> if (t == ta) then Just c else Nothing
 
 
-
-
 consumeJoin _ _ = undefined
-
 
 -- selectClause: [(ColMath, Maybe CA)]
 -- fromClauseL: (TR, [(TR, Maybe JoinCond)])
@@ -149,13 +146,15 @@ transform (SFW selectC ((src, mTableAlias), []) whereC)
 
 
 transform (SFW selectC (t1, xs) whereC) | xs /= []
-  = Sel (undefined selX) $ Proj (undefined whereX) $ resultX
+  = Sel selection $ Proj projection $ resultX
   where
-    -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
-    (resultX, selX, whereX) = foldl rf (ra, sel2, where2) xs
 
-    whereCNF :: MixWhereClauseCNF
-    whereCNF = mapPredicates (mapSides Read id) $ treeToPosCnf whereC
+    projection = Map.fromList [(fromMaybe (renderMathExpr cm) mca, cm) | (cm, mca) <- selX]
+
+    -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
+    (resultX, selX, selection) = foldl rf (ra, sel2, where2) xs
+
+    whereCNF = mapPredicates (mapSides Read id) $ treeToPosCnf whereC :: MixWhereClauseCNF
     (ra, sel2, where2) = consumeJoin (selectC, whereCNF) t1
 
     rf :: (RelAlg, SelectClause, MixWhereClauseCNF)
@@ -165,9 +164,6 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
     rf (leftRA, sc, mwc) (subQuery, mJoinCond)
       = (join leftRA rightRA mJoinCond, sc2, mwc2)
       where (rightRA, sc2, mwc2) = consumeJoin (sc, mwc) subQuery
-
-    -- TODO: kiszedjuk a table alias-ra vonatkozo oszlop neveket mindenhonnan
-    -- letrehozunk igy egy uj kifejezest es visszaadjuk a maradekot.
 
 {-
 -- TODO: impl GROUP BY and HAVING clauses too
