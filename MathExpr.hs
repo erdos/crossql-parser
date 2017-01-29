@@ -9,7 +9,7 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, renderMathExpr) where
+module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, renderMathExpr, mapMaybeMathExpr) where
 
 import Util
 
@@ -157,3 +157,31 @@ renderMathExpr (FnCall (Avg c)) = "AVG(" ++ c ++ ")"
 renderMathExpr (FnCall (Cnt c)) = "CNT(" ++ c ++ ")"
 renderMathExpr (FnCall (Min c)) = "SIN(" ++ c ++ ")"
 renderMathExpr (FnCall (Max c)) = "SAX(" ++ c ++ ")"
+
+
+--mapMonadMathExpr :: (Monad m) => (a -> m b) -> (MathExpr a) -> m (MathExpr b)
+--mapMonadMathExpr f (Read x) = fmap Read (f x)
+--mapMonadMathExpr f (Add x y) = fmap (\(a,b)-> Add a b) (f x, f y)
+
+mapMaybeMathExpr :: (a -> Maybe b) -> (MathExpr a) -> Maybe (MathExpr b)
+mapMaybeMathExpr f (Read a) = fmap Read $ f a
+mapMaybeMathExpr _ (Sca a) = Just $ Sca a
+mapMaybeMathExpr f (Add a b) = fmap (uncurry Add) (maybeTuple (mapMaybeMathExpr f a, mapMaybeMathExpr f b))
+mapMaybeMathExpr f (Sub a b) = fmap (uncurry Sub) (maybeTuple (mapMaybeMathExpr f a, mapMaybeMathExpr f b))
+mapMaybeMathExpr f (Mul a b) = fmap (uncurry Mul) (maybeTuple (mapMaybeMathExpr f a, mapMaybeMathExpr f b))
+mapMaybeMathExpr f (Div a b) = fmap (uncurry Div) (maybeTuple (mapMaybeMathExpr f a, mapMaybeMathExpr f b))
+
+mapMaybeMathExpr f (FnCall (Sum a)) = fmap (FnCall . Sum) (f a)
+mapMaybeMathExpr f (FnCall (Avg a)) = fmap (FnCall . Avg) (f a)
+mapMaybeMathExpr f (FnCall (Max a)) = fmap (FnCall . Max) (f a)
+mapMaybeMathExpr f (FnCall (Min a)) = fmap (FnCall . Min) (f a)
+mapMaybeMathExpr f (FnCall (Cnt a)) = fmap (FnCall . Cnt) (f a)
+
+--case f a of
+--  Nothing -> Nothing
+--  Just x -> Just $ FnCall $ Sum x
+
+
+-- mapMonadMathExpr f (Sca s) = fmap f undefined
+
+--mapMonadMathExpr _ _ = undefined

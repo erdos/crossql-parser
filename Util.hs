@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2, maybeTuple) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -67,6 +67,7 @@ splitEither f (x:xs) = case f x of
   where
     (as, bs) = splitEither f xs
 
+
 maybeAll :: [Maybe a] -> Maybe [a]
 maybeAll [] = Just []
 maybeAll (Nothing : _) = Nothing
@@ -92,3 +93,8 @@ mapAssoc2 :: (Ord a, Ord b) => a-> b-> c -> M.Map a (M.Map b c) -> M.Map a (M.Ma
 mapAssoc2 k1 k2 v m = case M.lookup k1 m of
   Nothing -> M.insert k1 (M.insert k2 v M.empty) m
   Just m2 -> M.insert k1 (M.insert k2 v m2)      m
+
+maybeTuple :: (Maybe a, Maybe b) -> Maybe (a, b)
+maybeTuple (Nothing, _) = Nothing
+maybeTuple (_, Nothing) = Nothing
+maybeTuple (Just a, Just b) = Just (a, b)
