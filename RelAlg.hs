@@ -148,6 +148,7 @@ consumeJoin _ _ = undefined
 
 transform :: QuerySpec -> RelAlg
 
+-- SELECT ... FROM <t> WHERE ...
 transform (SFW selectC ((Left tableName, _), []) whereC)
   = (if selCondClauses == [] then id else Proj projMapIdentity)
   $ (if selCondClauses == [] then id else Sel (fromClauses selCondClauses))
@@ -234,8 +235,10 @@ transform (SFWG select fromC whereC groupingColNames)
 
     innerRelation = transform (SFW innerSelectC fromC whereC)
 
-transform (SFWGH s f w g having) = Sel selCond $ transform $ SFWG s f w g
-  where selCond = undefined -- TODO: impl this
 -}
+
+transform (SFWGH s f w g having) = Sel selCond $ transform $ SFWG s f w g
+  where selCond = mapPredicates m $ treeToPosCnf having -- TODO: impl this
+        m = mapSides (FnCall . fmap (TCN Nothing)) Sca
 
 transform _ = undefined
