@@ -7,7 +7,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module RelAlg (RelAlg, transform, placeholder) where
+module RelAlg (RelAlg, transform) where
 
 import Data.Map.Strict as Map (Map, fromList, union, keys)
 import Data.Maybe
@@ -25,7 +25,7 @@ type MixWhereClauseCNF = PosCNF (Comp (MathExpr TabColName))
 data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner join
           deriving (Eq, Ord, Show)
 
-data RelAlg = From [ColumnName] TableName
+data RelAlg = From [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
             | Joins JS
             | Sel (PosCNF (Comp (MathExpr TabColName))) RelAlg
             -- normalize step shall turn Sel to CleanSel where possible
@@ -34,9 +34,20 @@ data RelAlg = From [ColumnName] TableName
             | Aggr (Map ColumnName (AggregateFn TabColName)) [TabColName] RelAlg
             deriving (Eq, Ord, Show)
 
+instance PrClj RelAlg where
+  pr (From cs cnf (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ ", :cond" ++ pr cnf  ++"}"
+  pr (Sel sc r) = "{:select " ++ pr sc ++ ", :src " ++ pr r ++ "}"
+  pr (Proj pp r) = "{:project " ++ pr pp ++ ", :src " ++ pr r ++ "}"
+  pr (Joins (NaturalJoin cs t1 t2))
+    = "{:join :natural, "
+      ++ ":left " ++ pr t1
+      ++ ", :right " ++ pr t2
+      ++ ", :on {" ++ (concatMap (\(a, b) -> pr a ++ " " ++ pr b) cs) ++ "}}"
+  pr _ = "??"
+
 
 getTableName :: RelAlg -> Maybe TableName
-getTableName (From _ tn) = Just tn
+getTableName (From _ _ tn) = Just tn
 getTableName (Joins _) = Nothing
 getTableName (Sel _ a) = getTableName a
 getTableName (Proj _ a) = getTableName a
@@ -63,31 +74,21 @@ join leftRA rightRA (Just jc) = optionalSel $ natJoin where
   otherClauses :: [[Comp (MathExpr TabColName)]]
   (eqs, otherClauses) = partitionEithers $ map pf $ clauses $ treeToPosCnf jc
 
--- TODO: nem jo, ha az oszlopnev idezojelek kozt van, vagy matekos kifejezes tizedesponttal
---columnGetTable :: ColumnName -> Maybe (TableName, ColumnName)
---columnGetTable (CN cn) = case elemIndex '.' cn of
---  Nothing -> Nothing
---  Just i -> let (tns, cns) = splitAt i cn in
---    Just $ (TN tns, CN cns)
 
--- levalogatja a relevans select/where klozokat
--- keszit belole egy kifejezest
--- a maradekot visszaadja
 consumeJoin :: (SelectClause, MixWhereClauseCNF)
                  -> (Either TableName QuerySpec, Maybe TableName)
                  -> (RelAlg, SelectClause, MixWhereClauseCNF)
-consumeJoin x (Left tn, Nothing) = consumeJoin x (Left tn, Just tn) -- get defanult table name alias
+consumeJoin x (Left table, Nothing) = consumeJoin x (Left table, Just table)
 
 consumeJoin (sc, whereCNF) (Left tn, Just _) -- FIXME: second arg is table alias, should be used here.
   = (relAlg, selectRem, fromClauses whereRemClauses) where
   relAlg = Proj projMapIdentity
-           $ Sel selCond
+           $ Sel (fromClauses aaaaa)
            $ Proj (Map.union projMap projMapAll)
-           $ From fromColList tn
+           $ From fromColList (fromClauses aaaaToFrom) tn
 
   -- copy from other.
   projMapIdentity = Map.fromList $ map (\k -> (k, Read (TCN Nothing k))) $ Map.keys projMap
-  selCond = fromClauses whereClauses
   projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectRem]
   projMapAll = Map.fromList $ map (\t@(TCN _ c) -> (c, Read t)) $ colsWhereClause ++ colsSelectClause
 
@@ -117,74 +118,90 @@ consumeJoin (sc, whereCNF) (Left tn, Just _) -- FIXME: second arg is table alias
     Just mmm -> Right (mmm, mca)
     Nothing -> Left (cm, mca)
 
+
+  (aaaaa, aaaaToFrom) = partitionEithers $ map efn $ whereClauses where
+      efn clause = case maybeAll $ map cf clause of
+        Nothing -> Left $ clause
+        Just xs -> Right xs
+      cf :: Comp (MathExpr TabColName) -> Maybe (CompOrder ColumnName SomeScalar)
+      cf co = case sides co of
+        -- FIXME: maybe check here for table name matching!
+        (me, Read (TCN _ cn)) | Just ss <- maybeEvalScalar me
+                          -> Just $ Comp.flip $ replaceSides ss cn co
+
+        (Read (TCN _ cn), me) | Just ss <- maybeEvalScalar me
+                         ->  Just $ replaceSides cn ss co
+        _ -> Nothing
+
+
+
+  -- itt a selectC TODO:TODO:TODO:FIXME:TODO:XXX:
+
+
   -- TODO: megnezni, h kell-e melyebb strategia.
   maybeGoodColumn :: TabColName -> Maybe TabColName
   maybeGoodColumn a@(TCN (Just t) _) | t == tn = Just a
   maybeGoodColumn (TCN Nothing _) = undefined -- megnezni h kell-e melyebb strategia.
   maybeGoodColumn _ = Nothing
 
-
 consumeJoin _ _ = undefined
 
--- selectClause: [(ColMath, Maybe CA)]
--- fromClauseL: (TR, [(TR, Maybe JoinCond)])
---     TR: (Either TN SubQuery, Maybe TableAlias)
---  JoinCond: LogicTree (Comp (MathExpr CA))
--- whereClause: LogicTree (CompOrder CN (MathExpr CN))
 transform :: QuerySpec -> RelAlg
 
 transform (SFW selectC ((Left tableName, _), []) whereC)
-  = Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ From allColNames tableName
+  = (if selCondClauses == [] then id else Proj projMapIdentity)
+  $ (if selCondClauses == [] then id else Sel (fromClauses selCondClauses))
+  $ (if selCondClauses == [] then Proj projMap else Proj (Map.union projMap projMapAll))
+  $ From allColNames (fromClauses fromConditionClauses) tableName
   where
-    -- tableAlias = fromMaybe tableName mTableAlias
-
-    -- az osszes oszlopnev SELECT valtozok + WHERE kifejezesekbol
-    allColNames :: [ColumnName] -- FIXME: itt leelenorizni, hogy minden tnev nothing vagy just tableAlias !!!
-    -- TODO: maybe dedup!
-    allColNames = [cn | (TCN _ cn) <- concatMap (collect . fst) selectC]
+    allColNames :: [ColumnName]
+    -- FIXME: itt leelenorizni, hogy minden tnev nothing vagy just tableAlias !!!
+    allColNames = unique
+                  $ [cn | (TCN _ cn) <- concatMap (collect . fst) selectC]
                   ++ [cn | (s1, s2) <- map sides $ predicates whereCNF
                          , (TCN _ cn) <- s1 : collect s2] -- TODO: finish
 
-    -- projMap = undefined
     projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectC]
+    projMapAll = Map.fromList [(cn, Read (TCN Nothing cn)) | cn <- allColNames]
+    projMapIdentity = Map.fromList [ (colName, Read (TCN Nothing colName))
+                                   | colName <- Map.keys projMap]
+
+    (selCondClauses, fromConditionClauses) = partitionEithers $ map efn $ clauses whereCNF where
+      efn clause = case maybeAll $ map cf clause of
+        Nothing -> Left $ map (mapSides Read id) clause
+        Just xs -> Right xs
+      cf :: CompOrder TabColName (MathExpr TabColName) -> Maybe (CompOrder ColumnName SomeScalar)
+      cf co = case sides co of
+        -- FIXME: maybe check here for table name matching!
+        (TCN _ cn, me) | Just ss <- maybeEvalScalar me
+                         ->  Just $ replaceSides cn ss co
+        _ -> Nothing
+    whereCNF = treeToPosCnf whereC
 
 
-    -- a select klozbol eloallitunk egy identitast.
-    projMapIdentity = Map.fromList [ (colName, Read (TCN Nothing colName)) | colName <- Map.keys projMap]
+-- SELECT ... FROM (SELECT ...) ...
+transform (SFW selectC ((Right subQuery, _), []) whereC)
+  = Proj projMapIdentity
+  $ Sel whereCNFMix
+  $ Proj (Map.union projMap projMapAll)
+  $ transform subQuery
+  where
+    -- TODO: megnezni, hogy az table nevek ne tunjenek el foloslegesen.
+    allColNames :: [ColumnName]
+    allColNames = unique
+                  $ [cn | (TCN _ cn) <- concatMap (collect . fst) selectC]
+                  ++ [cn | (s1, s2) <- map sides $ predicates whereCNF
+                         , (TCN _ cn) <- s1 : collect s2] -- TODO: finish
 
-    -- a where klzobol jon
-    selCond = mapPredicates (mapSides Read id) whereCNF
-
+    projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectC]
+    projMapAll = Map.fromList [(cn, Read (TCN Nothing cn)) | cn <- allColNames]
+    projMapIdentity = Map.fromList [ (colName, Read (TCN Nothing colName))
+                                   | colName <- Map.keys projMap]
 
     whereCNF = treeToPosCnf whereC
-    projMapAll = Map.fromList [(cn, Read (TCN Nothing cn)) | cn <- allColNames]
+    whereCNFMix = mapPredicates (mapSides Read id) whereCNF
 
-{-
--- JOIN nelkuli tablak kezelese, ez is kell es elvileg jo strategia.
-transform (SFW selectC ((src, _), []) whereC)
-  =  Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ source
-  where
-    source = case src of Left tableName -> From (colsWhereClause ++ colsSelectClause) tableName
-                         Right subQuery -> transform subQuery
-
-    -- TODO: optionally use mTableAlias and tableName to de-qualify col name symbols.
-    -- tableAlias = fromMaybe tableName mTableAlias
-    -- TODO: resolve them by aliases from select clause!!
-    colsWhereClause :: [ColumnName]
-    colsWhereClause = concatMap (\(a,b) -> a:collect b) $ map sides $ predicates whereClausePosCNF
-    colsSelectClause = concatMap (collect . fst) selectC :: [ColumnName]
-
-    projMapIdentity = Map.fromList [(k, Read k) | k <- Map.keys projMap]
-    projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectC]
-
-    -- az osszes oszlopnev benne van - IDENTITAS
-    projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
-
-    whereClausePosCNF = treeToPosCnf whereC :: PosCNF (CompOrder ColumnName (MathExpr ColumnName))
-    -- TODO: optionally replace column names with aliases from projMap
-    selCond = mapPredicates (mapSides Read id) whereClausePosCNF
--}
-
+-- SELECT ... FROM t1, t2, ...
 transform (SFW selectC (t1, xs) whereC) | xs /= []
   = Sel selection $ Proj projection $ resultX
   where
@@ -222,13 +239,3 @@ transform (SFWGH s f w g having) = Sel selCond $ transform $ SFWG s f w g
 -}
 
 transform _ = undefined
-
-
-placeholder :: undefined
-placeholder = undefined
-
-instance PrClj RelAlg where
-  pr (From cs (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ "}"
-  pr (Sel sc r) = "{:select " ++ pr sc ++ ", :src " ++ pr r ++ "}"
-  pr (Proj pp r) = "{:project " ++ pr pp ++ ", :src " ++ pr r ++ "}"
-  pr _ = "??"

@@ -8,7 +8,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, sides, mapSides, mapSides1, parse, parse1, elems, elemsList, rightSide, leftSide, maybeComp) where
+module Comp(CompOrder(CST, CLT, CEQ, CLEQ, CSEQ, CNEQ), Comp, Comp.flip, sides, mapSides, mapSides1, parse, parse1, elems, elemsList, rightSide, leftSide, maybeComp, replaceSides) where
 
 import Text.Parsec as TP
   ((<|>), string, spaces, try)
@@ -63,6 +63,9 @@ mapSides f g (CSEQ x y) = CSEQ (f x) (g y)
 
 mapSides1 :: (a -> e) -> Comp a -> Comp e
 mapSides1 f = mapSides f f
+
+replaceSides :: a -> b -> CompOrder c d -> CompOrder a b
+replaceSides x y co = mapSides (const x) (const y) co
 
 maybeComp :: CompOrder (Maybe a) (Maybe b) -> Maybe (CompOrder a b)
 maybeComp c = case sides c of

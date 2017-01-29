@@ -6,11 +6,11 @@ module Util (PrClj(pr),
              Negateable(negative),
              stringI, parseIdentifier,
              splitEither, maybeAll, maybeAllMapToSame, maybeTuple,
-             groupMapBy,  allTheSame, mapAssoc2,
+             groupMapBy,  allTheSame, mapAssoc2, unique,
              ColumnName(CN), TableName(TN), TabColName(TCN)) where
 
 import Data.Char(toUpper)
-import Data.List (nub, delete, intercalate)
+import Data.List (nub, delete, intercalate, group, sort)
 
 import Text.Parsec (ParseError, (<?>), (<|>), satisfy, char, many1, noneOf, letter, many, alphaNum, oneOf)
 import Text.Parsec.Error (Message(..), errorMessages)
@@ -39,8 +39,8 @@ instance PrClj TableName where
   pr (TN cn) = "(tn\"" ++ cn ++ "\")"
 
 instance PrClj TabColName where
-  pr (TCN Nothing (CN cn)) = "(tcn\"" ++ cn ++ "\")"
-  pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ cn ++ "\" \""++ tn ++ "\")"
+  pr (TCN Nothing (CN cn)) = "(tcn nil \"" ++ cn ++ "\")"
+  pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ tn ++ "\" \""++ cn ++ "\")"
 
 instance PrClj ParseError where
   pr pe = "{"
@@ -119,3 +119,6 @@ maybeTuple :: (Maybe a, Maybe b) -> Maybe (a, b)
 maybeTuple (Nothing, _) = Nothing
 maybeTuple (_, Nothing) = Nothing
 maybeTuple (Just a, Just b) = Just (a, b)
+
+unique :: (Ord a) => [a] -> [a]
+unique = map head . group . sort
