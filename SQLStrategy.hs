@@ -191,7 +191,7 @@ transformer (SFW selectClause ((Right nestedQuery, maybeTableAlias), []) whereCl
         where
           -- TODO: merge SELECT+WHERE into transform
           mixedTransform = undefined nestedTransform selectClause whereClause
-      _ -> undefined -- nem tudjuk h mi tortenik group-by eseten.
+      _ -> undefined maybeTableAlias-- nem tudjuk h mi tortenik group-by eseten.
 
 
 -- TODO: filter select, where clauses. eval with head item then with tail and merge them.
@@ -200,7 +200,7 @@ transformer (SFW selectClause (currentTableRef, ((tableRef, maybeJoinCond): xs))
   where
     -- selectClause - get all col names from maths.
 
-    transformQuery = undefined selectClause whereClause x xs
+    transformQuery = undefined selectClause whereClause tableRef maybeJoinCond xs currentTableRef
 
 -- ezeket raer kesobb implementalni.
 

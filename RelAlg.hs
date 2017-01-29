@@ -77,11 +77,13 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses 
            $ From tn
 
   -- copy from other.
-  projMapIdentity = undefined whereClauses
-  selCond = undefined selectC
-  projMap = undefined whereClauses
-  projMapAll = undefined whereClauses
-
+  projMapIdentity = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
+  selCond = fromClauses whereClauses
+  projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (renderMathExpr cm) mCA, cm)) selectRem
+  projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
+  colsWhereClause =  concatMap (\(a,b) -> collect a ++ collect b) $  concatMap (map sides) $ whereRemClauses
+  colsSelectClause = concatMap (collect . fst) selectC
+  -- end of close
 
   -- szetvalogatja az alapjan, hogy a klozon belul minden elem egy tablahoz tartozik v sem
   (whereClauses, whereRemClauses) = partitionEithers $ map wherePart $ clauses whereCNF
@@ -97,8 +99,8 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses 
       preds cmp = maybeComp $ mapSides1 (mapMaybeMathExpr maybeGoodColumn) cmp
 
   -- a szelekt-ek kozul csak azt valasztjuk ki, aminek a table aliasa realisan jo.
-  selectRem :: SelectClause
-  (selectRem, selectC) = partitionEithers $ map selectPart sc
+
+  (selectRem, selectC) = partitionEithers $ map selectPart sc :: (SelectClause, SelectClause)
   selectPart (cm, mca) = case mapMaybeMathExpr maybeGoodColumn cm of
     Just mmm -> Right (mmm, mca)
     Nothing -> Left (cm, mca)
@@ -119,7 +121,7 @@ consumeJoin _ _ = undefined
 transform :: QuerySpec -> RelAlg
 
 -- JOIN nelkuli tablak kezelese, ez is kell es elvileg jo strategia.
-transform (SFW selectC ((src, mTableAlias), []) whereC)
+transform (SFW selectC ((src, _), []) whereC)
   =  Proj projMapIdentity $ Sel selCond $ Proj (Map.union projMap projMapAll) $ source
   where
     source = case src of Left tableName -> From tableName
@@ -130,12 +132,10 @@ transform (SFW selectC ((src, mTableAlias), []) whereC)
     -- TODO: resolve them by aliases from select clause!!
     colsWhereClause :: [ColumnName]
     colsWhereClause = concatMap (\(a,b) -> a:collect b) $ map sides $ predicates whereClausePosCNF
-    -- column names from select expressions
-    colsSelectClause :: [ColumnName]
-    colsSelectClause = concatMap (collect . fst) selectC
+    colsSelectClause = concatMap (collect . fst) selectC :: [ColumnName]
 
-    projMapIdentity = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
-    projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (renderMathExpr cm) mCA, cm)) selectC
+    projMapIdentity = Map.fromList [(k, Read k) | k <- Map.keys projMap]
+    projMap = Map.fromList [(fromMaybe (renderMathExpr cm) mCA, cm) | (cm, mCA) <- selectC]
 
     -- az osszes oszlopnev benne van - IDENTITAS
     projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
