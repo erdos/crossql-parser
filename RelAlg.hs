@@ -20,7 +20,6 @@ import CNF
 import Comp
 import MathExpr
 
-type SelCond = PosCNF (Comp (MathExpr ColumnName))
 type MixWhereClauseCNF = PosCNF (Comp (MathExpr ColumnName))
 
 -- TODO: later impl other joins
@@ -29,20 +28,20 @@ data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner joi
 
 data RelAlg = From [ColumnName] TableName
             | Joins JS
-            | Sel  SelCond RelAlg
+            | Sel (PosCNF (Comp (MathExpr TabColName))) RelAlg
             -- normalize step shall turn Sel to CleanSel where possible
             -- | CleanSel (PosCNF (CompOrder ColumnName SomeScalar)) RelAlg
-            | Proj (Map ColumnName (MathExpr ColumnName)) RelAlg
-            | Aggr (Map ColumnName (AggregateFn ColumnName)) [ColumnName] RelAlg
+            | Proj (Map ColumnName (MathExpr TabColName)) RelAlg
+            | Aggr (Map ColumnName (AggregateFn TabColName)) [TabColName] RelAlg
             deriving (Eq, Ord, Show)
 
-
+{-
 hasColName :: ColumnName -> RelAlg -> Bool
 hasColName c (From cns _) = elem c cns
 hasColName c (Proj _ t)= or [undefined c, hasColName c t]
 hasColName c (Aggr m cns _) = or [member c m, elem c cns]
 hasColName _ _ = undefined
-
+-}
 
 join :: RelAlg -> RelAlg -> (Maybe JoinCond) -> RelAlg
 join leftRA rightRA Nothing = Joins (NaturalJoin [] leftRA rightRA)
@@ -190,7 +189,7 @@ transform _ = undefined
 
 
 placeholder :: undefined
-placeholder = undefined hasColName
+placeholder = undefined
 
 instance PrClj RelAlg where
   pr (From cs (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ "}"

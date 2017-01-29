@@ -20,7 +20,7 @@ import Text.Parsec.String as TPS
 
 data TableName = TN String deriving (Eq, Show, Ord)
 data ColumnName = CN String deriving (Eq, Show, Ord)
-data TabColName = TCN (Maybe TableName) String deriving (Eq, Show, Ord)
+data TabColName = TCN (Maybe TableName) ColumnName deriving (Eq, Show, Ord)
 
 
 class PrClj a where
@@ -37,6 +37,10 @@ instance PrClj ColumnName where
 
 instance PrClj TableName where
   pr (TN cn) = "(tn\"" ++ cn ++ "\")"
+
+instance PrClj TabColName where
+  pr (TCN Nothing (CN cn)) = "(tcn\"" ++ cn ++ "\")"
+  pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ cn ++ "\" \""++ tn ++ "\")"
 
 instance PrClj ParseError where
   pr pe = "{"

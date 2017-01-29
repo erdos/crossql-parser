@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnMath, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference) where
+module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnMath,
+                  SQLParser.parse, runParser, SQLParser.parseLogicTree,
+                  SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference
+                 ) where
 
 import CNF
 import MathExpr
@@ -18,7 +21,7 @@ import Data.Maybe ()
 
 -- import Text.Parsec.Error (Message(..), errorMessages) Control.Monad Data.Char(toUpper)
 
-type ColumnMath = MathExpr ColumnName -- sum(1), etc.
+type ColumnMath = MathExpr TabColName -- sum(1), etc.
 
 type TableReference = (Either TableName SubQuery, Maybe TableName)
 
@@ -51,6 +54,14 @@ parseTableAlias = TN <$> parseIdentifier
 
 parseTableName :: Parser TableName
 parseTableName = TN <$> parseIdentifier
+
+parseTabColName :: Parser TabColName
+parseTabColName = do
+  tab <- parseIdentifier;
+  sec <- optionMaybe $ do {_ <- string "."; parseColumnName };
+  return $ case sec of Nothing -> TCN Nothing (CN tab)
+                       Just cc -> TCN (Just (TN tab)) cc
+
 
 -- ha subquery -> zarojelben van.
 
@@ -131,7 +142,7 @@ commasep1 f = sepBy1 f $ do  _ <- string ","; spaces
 
 parseSelectClause :: Parser SelectClause
 parseSelectClause = commasep1 $ do
-  cm <- parseMathExpr parseColumnAlias
+  cm <- parseMathExpr parseTabColName;
   spaces;
   kk <- try $ optionMaybe $ do
     _<- stringI "AS";
