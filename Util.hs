@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2, maybeTuple) where
+module Util (PrClj, pr, Negateable(negative), stringI, parseIdentifier, splitEither, maybeAll,groupMapBy, maybeAllMapToSame, allTheSame, mapAssoc2, maybeTuple, ColumnName(CN), TableName(TN)) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate)
@@ -12,6 +12,12 @@ import Text.Parsec.Error (Message(..), errorMessages)
 import qualified Data.Map.Strict as M
 import Text.Parsec.String as TPS
 
+
+data TableName = TN String deriving (Eq, Show, Ord)
+data ColumnName = CN String deriving (Eq, Show, Ord)
+
+
+
 class PrClj a where
   pr :: a -> String
 
@@ -20,6 +26,12 @@ class Negateable a where
 
 instance (PrClj a) => PrClj [a] where
   pr l = "[" ++ unwords (map pr l) ++ "]"
+
+instance PrClj ColumnName where
+  pr (CN cn) = "(cn\"" ++ cn ++ "\")"
+
+instance PrClj TableName where
+  pr (TN cn) = "(tn\"" ++ cn ++ "\")"
 
 instance PrClj ParseError where
   pr pe = "{"

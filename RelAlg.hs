@@ -32,8 +32,8 @@ data RelAlg = From TableName
             | Sel  SelCond RelAlg
             -- normalize step shall turn Sel to CleanSel where possible
             -- | CleanSel (PosCNF (CompOrder ColumnName SomeScalar)) RelAlg
-            | Proj (Map ColumnAlias (MathExpr ColumnName)) RelAlg
-            | Aggr (Map ColumnAlias (AggregateFn ColumnName)) [ColumnName] RelAlg
+            | Proj (Map ColumnName (MathExpr ColumnName)) RelAlg
+            | Aggr (Map ColumnName (AggregateFn ColumnName)) [ColumnName] RelAlg
             deriving (Eq, Ord, Show)
 
 
@@ -57,20 +57,22 @@ join leftRA rightRA (Just jc) = optionalSel $ natJoin where
                           | x <- (clauses cnf)]
 
 -- TODO: nem jo, ha az oszlopnev idezojelek kozt van, vagy matekos kifejezes tizedesponttal
-columnGetTable :: ColumnName -> Maybe (TableAlias, ColumnName)
-columnGetTable cn = case elemIndex '.' cn of
+columnGetTable :: ColumnName -> Maybe (TableName, ColumnName)
+columnGetTable (CN cn) = case elemIndex '.' cn of
   Nothing -> Nothing
-  Just i -> Just $ splitAt i cn
+  Just i -> let (tns, cns) = splitAt i cn in
+    Just $ (TN tns, CN cns)
 
 -- levalogatja a relevans select/where klozokat
 -- keszit belole egy kifejezest
 -- a maradekot visszaadja
 consumeJoin :: (SelectClause, MixWhereClauseCNF)
-                 -> (Either TableName QuerySpec, Maybe TableAlias)
+                 -> (Either TableName QuerySpec, Maybe TableName)
                  -> (RelAlg, SelectClause, MixWhereClauseCNF)
 consumeJoin x (Left tn, Nothing) = consumeJoin x (Left tn, Just tn) -- get defanult table name alias
 
-consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses whereRemClauses) where
+consumeJoin (sc, whereCNF) (Left tn, Just ta)
+  = (relAlg, selectRem, fromClauses whereRemClauses) where
   relAlg = Proj projMapIdentity
            $ Sel selCond
            $ Proj (Map.union projMap projMapAll)
@@ -79,7 +81,7 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses 
   -- copy from other.
   projMapIdentity = Map.fromList $ map (\k -> (k, Read k)) $ Map.keys projMap
   selCond = fromClauses whereClauses
-  projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (renderMathExpr cm) mCA, cm)) selectRem
+  projMap = Map.fromList $ map (\(cm, mCA) -> (fromMaybe (CN (renderMathExpr cm)) mCA, cm)) selectRem
   projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
   colsWhereClause =  concatMap (\(a,b) -> collect a ++ collect b) $  concatMap (map sides) $ whereRemClauses
   colsSelectClause = concatMap (collect . fst) selectC
@@ -105,7 +107,7 @@ consumeJoin (sc, whereCNF) (Left tn, Just ta) = (relAlg, selectRem, fromClauses 
     Just mmm -> Right (mmm, mca)
     Nothing -> Left (cm, mca)
 
-  maybeGoodColumn :: ColumnName -> Maybe ColumnAlias
+  maybeGoodColumn :: ColumnName -> Maybe ColumnName
   maybeGoodColumn a = case columnGetTable a of
     Nothing -> Nothing
     Just (t, c) -> if (t == ta) then Just c else Nothing
@@ -135,7 +137,7 @@ transform (SFW selectC ((src, _), []) whereC)
     colsSelectClause = concatMap (collect . fst) selectC :: [ColumnName]
 
     projMapIdentity = Map.fromList [(k, Read k) | k <- Map.keys projMap]
-    projMap = Map.fromList [(fromMaybe (renderMathExpr cm) mCA, cm) | (cm, mCA) <- selectC]
+    projMap = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mCA, cm) | (cm, mCA) <- selectC]
 
     -- az osszes oszlopnev benne van - IDENTITAS
     projMapAll = Map.fromList $ map (\x -> (x, Read x)) $ colsWhereClause ++ colsSelectClause
@@ -149,7 +151,7 @@ transform (SFW selectC (t1, xs) whereC) | xs /= []
   = Sel selection $ Proj projection $ resultX
   where
 
-    projection = Map.fromList [(fromMaybe (renderMathExpr cm) mca, cm) | (cm, mca) <- selX]
+    projection = Map.fromList [(fromMaybe (CN (renderMathExpr cm)) mca, cm) | (cm, mca) <- selX]
 
     -- TODO: ezek mar csak a maradekok, ezekbol kell kifejezest csinalni.
     (resultX, selX, selection) = foldl rf (ra, sel2, where2) xs
@@ -189,3 +191,9 @@ transform _ = undefined
 
 placeholder :: undefined
 placeholder = undefined hasColName
+
+instance PrClj RelAlg where
+  pr (From (TN c)) = "{:table \"" ++ c ++ "\"}"
+  pr (Sel sc r) = "{:select " ++ pr sc ++ ", :src " ++ pr r ++ "}"
+  pr (Proj pp r) = "{:project " ++ pr pp ++ ", :src " ++ pr r ++ "}"
+  pr _ = "??"

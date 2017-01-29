@@ -56,7 +56,9 @@ instance (PrClj a) => PrClj (AggregateFn a) where
   pr (Sum x) = "SUM(" ++ pr x ++ ")"
 
 instance PrClj SomeScalar where
-  pr _ = "SomeScalar"
+  pr (SS ss) = "\"" ++ ss ++ "\""
+  pr (II ii) = show ii
+  pr (DD dd) = show dd
 
 parseAggregateFn :: Parser a -> Parser (AggregateFn a)
 parseAggregateFn p = ff "MAX" Max <|> ff "AVG" Avg <|> ff "CNT" Cnt <|> ff "SUM" Sum where
@@ -77,7 +79,7 @@ instance Foldable MathExpr where
   foldMap f (FnCall x) = f (arg1 x)
 
 instance (PrClj t) => PrClj (MathExpr t) where
-  pr (Sca d) = show d
+  pr (Sca s) = pr s
   pr (Read t) = pr t
   pr (Add a b) = "(+ " ++ pr a ++ " " ++ pr b ++ ")"
   pr (Sub a b) = "(- " ++ pr a ++ " " ++ pr b ++ ")"
@@ -142,8 +144,8 @@ simplifyMathExpr expr = case expr of
 
 
 -- TODO: also use precendences and associativity!
-renderMathExpr :: MathExpr String -> String
-renderMathExpr (Read s) = s
+renderMathExpr :: MathExpr ColumnName -> String
+renderMathExpr (Read (CN s)) = s
 renderMathExpr (Sca (SS s)) =   "\"" ++ s ++ "\""
 renderMathExpr (Sca (II i)) = show i
 renderMathExpr (Sca (DD d)) = show d
@@ -152,11 +154,11 @@ renderMathExpr (Sub a b) = "(" ++ renderMathExpr a ++ ")-(" ++ renderMathExpr b 
 renderMathExpr (Mul a b) = "(" ++ renderMathExpr a ++ ")*(" ++ renderMathExpr b ++ ")"
 renderMathExpr (Div a b) = "(" ++ renderMathExpr a ++ ")/(" ++ renderMathExpr b ++ ")"
 
-renderMathExpr (FnCall (Sum c)) = "SUM(" ++ c ++ ")"
-renderMathExpr (FnCall (Avg c)) = "AVG(" ++ c ++ ")"
-renderMathExpr (FnCall (Cnt c)) = "CNT(" ++ c ++ ")"
-renderMathExpr (FnCall (Min c)) = "SIN(" ++ c ++ ")"
-renderMathExpr (FnCall (Max c)) = "SAX(" ++ c ++ ")"
+renderMathExpr (FnCall (Sum (CN c))) = "SUM(" ++ c ++ ")"
+renderMathExpr (FnCall (Avg (CN c))) = "AVG(" ++ c ++ ")"
+renderMathExpr (FnCall (Cnt (CN c))) = "CNT(" ++ c ++ ")"
+renderMathExpr (FnCall (Min (CN c))) = "SIN(" ++ c ++ ")"
+renderMathExpr (FnCall (Max (CN c))) = "SAX(" ++ c ++ ")"
 
 
 --mapMonadMathExpr :: (Monad m) => (a -> m b) -> (MathExpr a) -> m (MathExpr b)

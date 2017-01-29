@@ -17,7 +17,7 @@ handleLine :: String -> String
 handleLine line =
   case runParser parse () "" line of
     (Left pe) -> pr pe
-    (Right b) -> show $ transform b
+    (Right b) -> pr $ transform b
 
 main :: IO ()
 main = do

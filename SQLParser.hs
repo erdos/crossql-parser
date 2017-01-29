@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnName, ColumnAlias, ColumnMath, TableName, TableAlias, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference) where
+module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnMath, SQLParser.parse, runParser, SQLParser.parseLogicTree, SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference) where
 
 import CNF
 import MathExpr
@@ -18,14 +18,9 @@ import Data.Maybe ()
 
 -- import Text.Parsec.Error (Message(..), errorMessages) Control.Monad Data.Char(toUpper)
 
-type TableName = String
-type TableAlias = String
+type ColumnMath = MathExpr ColumnName -- sum(1), etc.
 
-type ColumnName = String
-type ColumnAlias = String
-type ColumnMath = MathExpr ColumnAlias -- sum(1), etc.
-
-type TableReference = (Either TableName SubQuery, Maybe TableAlias)
+type TableReference = (Either TableName SubQuery, Maybe TableName)
 
 type JoinCond = (LogicTree (Comp (MathExpr ColumnName)))
 type JoinedTable = (TableReference, [(TableReference,  Maybe JoinCond)])
@@ -34,9 +29,9 @@ type FromClause = JoinedTable
 type SubQuery = QuerySpec
 
 type WhereClause = LogicTree (CompOrder ColumnName (MathExpr ColumnName))
-type GroupByClause = [ColumnAlias]
-type HavingClause = LogicTree (CompOrder (AggregateFn ColumnAlias) SomeScalar)
-type SelectClause = [(ColumnMath, Maybe ColumnAlias)]
+type GroupByClause = [ColumnName]
+type HavingClause = LogicTree (CompOrder (AggregateFn ColumnName) SomeScalar)
+type SelectClause = [(ColumnMath, Maybe ColumnName)]
 
 data QuerySpec -- root
   = SFW SelectClause FromClause WhereClause
@@ -45,17 +40,17 @@ data QuerySpec -- root
   deriving (Eq, Ord, Show)
 
 
-parseColumnAlias :: Parser ColumnAlias
-parseColumnAlias = parseIdentifier
+parseColumnAlias :: Parser ColumnName
+parseColumnAlias = CN <$> parseIdentifier
 
 parseColumnName :: Parser ColumnName
-parseColumnName = parseIdentifier
+parseColumnName = CN <$> parseIdentifier
 
-parseTableAlias :: Parser TableAlias
-parseTableAlias = parseIdentifier
+parseTableAlias :: Parser TableName
+parseTableAlias = TN <$> parseIdentifier
 
 parseTableName :: Parser TableName
-parseTableName = parseIdentifier
+parseTableName = TN <$> parseIdentifier
 
 -- ha subquery -> zarojelben van.
 
