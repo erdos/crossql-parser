@@ -9,7 +9,7 @@
 
 module RelAlg (RelAlg, transform) where
 
-import Data.Map.Strict as Map (Map, fromList, union, keys)
+import Data.Map.Strict as Map (Map, fromList, union, keys, assocs)
 import Data.Maybe
 import Data.Either
 
@@ -35,9 +35,11 @@ data RelAlg = From [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) Table
             deriving (Eq, Ord, Show)
 
 instance PrClj RelAlg where
-  pr (From cs cnf (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ ", :cond" ++ pr cnf  ++"}"
-  pr (Sel sc r) = "{:select " ++ pr sc ++ ", :src " ++ pr r ++ "}"
-  pr (Proj pp r) = "{:project " ++ pr pp ++ ", :src " ++ pr r ++ "}"
+  pr (From cs cnf (TN c)) = "{:table \"" ++ c ++ "\", :cols " ++ pr cs ++ ", :cond " ++ pr cnf  ++"}"
+  pr (Sel sc r) = "{:select " ++ scp ++ ", :src " ++ pr r ++ "}" where
+    scp = pr sc -- "{" ++ concat [ "xx" | (k, v) <- assocs sc] ++ "}"
+  pr (Proj pp r) = "{:project " ++ proj ++ ", :src " ++ pr r ++ "}" where
+    proj = "{" ++ concat [ '"' : k ++ '"' : " " ++ pr v | (CN k, v) <- assocs pp] ++ "}"
   pr (Joins (NaturalJoin cs t1 t2))
     = "{:join :natural, "
       ++ ":left " ++ pr t1
