@@ -27,11 +27,9 @@ data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner joi
 
 data RelAlg = From [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
             | Joins JS
-            | Sel (PosCNF (Comp (MathExpr TabColName))) RelAlg
-            -- normalize step shall turn Sel to CleanSel where possible
-            -- | CleanSel (PosCNF (CompOrder ColumnName SomeScalar)) RelAlg
-            | Proj (Map ColumnName (MathExpr TabColName)) RelAlg
-            | Aggr (Map ColumnName (AggregateFn TabColName)) [TabColName] RelAlg
+            | Sel (PosCNF (Comp (MathExpr ColumnName))) RelAlg
+            | Proj (Map ColumnName (MathExpr ColumnName)) RelAlg
+            -- | Aggr (Map ColumnName (AggregateFn ColumnName)) [ColumnName] RelAlg
             deriving (Eq, Ord, Show)
 
 instance PrClj RelAlg where
@@ -53,7 +51,7 @@ getTableName (From _ _ tn) = Just tn
 getTableName (Joins _) = Nothing
 getTableName (Sel _ a) = getTableName a
 getTableName (Proj _ a) = getTableName a
-getTableName (Aggr _ _ a) = getTableName a
+-- getTableName (Aggr _ _ a) = getTableName a
 
 join :: RelAlg -> RelAlg -> (Maybe JoinCond) -> RelAlg
 join leftRA rightRA Nothing = Joins (NaturalJoin [] leftRA rightRA)
