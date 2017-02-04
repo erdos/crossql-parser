@@ -1,4 +1,5 @@
 #!/usr/bin/env runhaskell
+
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -46,9 +47,7 @@ instance PrClj ColumnQualified where
 
 -- cnfOrderedMathUnorder :: PosCNF (CompOrder a SomeNumber)
 
-newtype ColumnName  = CN String deriving (Show, Eq, Ord)
 newtype ColumnAlias = CA String deriving (Show, Eq, Ord)
-newtype TableName   = TN String deriving (Show, Eq, Ord)
 newtype TableAlias  = TA String deriving (Show, Eq, Ord)
 
 
@@ -99,12 +98,6 @@ data ResultQueryTree = NestedRQT
 
 instance PrClj ColumnAlias where
   pr (CA s) = s
-
-instance PrClj ColumnName where
-  pr (CN s) = s
-
-instance PrClj TableName where
-  pr (TN s) = s
 
 instance PrClj TableAlias where
   pr (TA s) = s
