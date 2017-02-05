@@ -7,7 +7,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-module RelAlg (RelAlg, transform) where
+module RelAlg (RelAlg, transform, getMaybeOutmostProj, getMaybeOutmostTN) where
 
 import Data.Map.Strict as Map (Map, fromList, union, keys, assocs)
 import Data.Maybe
@@ -25,11 +25,11 @@ type MixWhereClauseCNF = PosCNF (Comp (MathExpr TabColName))
 data JS = NaturalJoin [(ColumnName, ColumnName)] RelAlg RelAlg -- full inner join
           deriving (Eq, Ord, Show)
 
-type ProjBody = (Map ColumnName (MathExpr ColumnName))
+type ProjBody = (Map ColumnName (MathExpr TabColName))
 
 data RelAlg = From [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
             | Joins JS
-            | Sel (PosCNF (Comp (MathExpr ColumnName))) RelAlg
+            | Sel (PosCNF (Comp (MathExpr TabColName))) RelAlg
             | Proj ProjBody RelAlg
             -- | Aggr (Map ColumnName (AggregateFn ColumnName)) [ColumnName] RelAlg
             deriving (Eq, Ord, Show)
@@ -45,7 +45,7 @@ instance PrClj RelAlg where
       ++ ":left " ++ pr t1
       ++ ", :right " ++ pr t2
       ++ ", :on {" ++ (concatMap (\(a, b) -> pr a ++ " " ++ pr b) cs) ++ "}}"
-  pr _ = "??"
+  --  pr _ = "??"
 
 -- megkeresi a legkulso projekciot
 -- arra hasznaljuk, hogy join-olaskor eloallithassunk egy-egy olyan projekciot (mindket aghoz), amelyben benne vannak az table qualified oszlopnevek is.
@@ -53,13 +53,13 @@ getMaybeOutmostProj :: RelAlg -> Maybe ProjBody
 getMaybeOutmostProj (Proj b _) = Just b
 getMaybeOutmostProj (Sel _ r) = getMaybeOutmostProj r
 getMaybeOutmostProj (Joins _) = Nothing
-getMaybeOutmostProj (From cns _ _) = Just $ fromList $ [(c, Read c) | c <- cns]  -- TODO ez a lenyeg
+getMaybeOutmostProj (From cns _ _) = Just $ fromList $ [(c, Read $ TCN Nothing c) | c <- cns]  -- TODO ez a lenyeg
 
 -- lekerdezi az adott ag tablanevet (ha van es az ag nem join eredmenye)
 getMaybeOutmostTN :: RelAlg -> Maybe TableName
 getMaybeOutmostTN (Joins _) = Nothing
 getMaybeOutmostTN (Sel _ r) = getMaybeOutmostTN r
-getMaybeOutmostTN (Proj pb r) = getMaybeOutmostTN r
+getMaybeOutmostTN (Proj _ r) = getMaybeOutmostTN r
 getMaybeOutmostTN (From _ _ t) = Just t
 
 getTableName :: RelAlg -> Maybe TableName
