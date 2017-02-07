@@ -9,7 +9,7 @@
 
 -- http://www.databasteknik.se/webbkursen/relalg-lecture/
 
-module TextbookRelAlg (RelAlg, transform, getMaybeTableId, getColumns) where
+module TextbookRelAlg (RelAlg, transform) where
 
 import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map)
 import Data.Maybe
@@ -54,6 +54,7 @@ getMaybeTableId (MTableAlias tn _) = Just tn
 getMaybeTableId (MProjection _ x) = getMaybeTableId x
 getMaybeTableId (InnerJoin _ _ _ _) = Nothing
 
+{-
 getColumns :: RelAlg -> [ColumnName]
 getColumns (Source _) = []
 getColumns (MTableAlias _ r) = getColumns r
@@ -62,6 +63,7 @@ getColumns (Selection _ r) = getColumns r
 getColumns (Rename m r) = unique (keys m ++ getColumns r)
 getColumns (InnerJoin _ _ _ _) = []
 getColumns (MProjection xs _) = xs
+-}
 
 renderMathCol :: (RenderColName a) => MathExpr a -> Maybe ColumnName -> ColumnName
 renderMathCol cm mcn = fromMaybe (CN (renderColName cm)) mcn
@@ -119,12 +121,7 @@ preMapBranches (FromJoined _ (Right sq) _ xs) = (transform sq) : (preMapBranches
 
 
 mapWhereClause :: WhereClause -> PosCNF (Comp ColMath)
-mapWhereClause w = (mapPredicates (mapSides (Read . colName) (fmap colName))
-                      $ treeToPosCnf w)
-
--- mapWhereClauseTab :: WhereClause -> PosCNF (Comp TabColMath)
--- mapWhereClauseTab w = mapPredicates (mapSides Read id) $ treeToPosCnf w
-
+mapWhereClause w = (mapPredicates (mapSides (Read . colName) (fmap colName)) $ treeToPosCnf w)
 
 -- TODO: add maybe stuff or error reporting at least.
 doJoins :: TabColCNF -> [RelAlg] -> (TabColCNF, RelAlg)
@@ -178,7 +175,7 @@ transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
 -- TODO: maybe add projections too
 -- TODO: maybe expand equivalences
 -- TODO: maybe add meta too.
-transform (SFW selectClause fromClause whereClause)
+transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
   = Selection filterCNF $ Rename renameMap $ joined
   where
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
@@ -194,5 +191,6 @@ transform (SFW selectClause fromClause whereClause)
           fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
           fromCnf (FromJoined _ _ Nothing xs) = fromCnf xs
 
-transform _ = undefined
--- TODO:  talan a feltetelek atrendezese kesobbi feladat?
+transform (SFWG _ _ _ _) = undefined
+
+transform (SFWGH _ _ _ _ _) = undefined
