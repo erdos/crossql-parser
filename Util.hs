@@ -5,6 +5,7 @@
 module Util (PrClj(pr),
              Negateable(negative),
              stringI, parseIdentifier,
+             colName,
              splitEither, maybeAll, maybeAllMapToSame, maybeTuple,
              groupMapBy,  allTheSame, mapAssoc2, unique,
              ColumnName(CN), TableName(TN), TabColName(TCN)) where
@@ -22,6 +23,8 @@ data TableName = TN String deriving (Eq, Show, Ord)
 data ColumnName = CN String deriving (Eq, Show, Ord)
 data TabColName = TCN (Maybe TableName) ColumnName deriving (Eq, Show, Ord)
 
+colName :: TabColName -> ColumnName
+colName (TCN _ c) = c
 
 class PrClj a where
   pr :: a -> String

@@ -9,7 +9,7 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 
-module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, renderMathExpr, mapMaybeMathExpr) where
+module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, RenderColName(renderColName), mapMaybeMathExpr) where
 
 import Util
 
@@ -142,32 +142,33 @@ simplifyMathExpr expr = case expr of
     op _ _ f (Sca (II i)) (Sca (SS s)) = liftM (Sca . SS) $ f (show i) s
     op _ _ _ _ _ = Nothing
 
-renderTabColName :: TabColName -> String
-renderTabColName (TCN Nothing (CN s)) = s
-renderTabColName (TCN (Just (TN t)) (CN c)) = t ++ "." ++ c
 
--- TODO: also use precendences and associativity!
-renderMathExpr :: MathExpr TabColName -> String
-renderMathExpr (Read tcn) = renderTabColName tcn
+class RenderColName a where
+  renderColName :: a -> String
 
-renderMathExpr (Sca (SS s)) =   "\"" ++ s ++ "\""
-renderMathExpr (Sca (II i)) = show i
-renderMathExpr (Sca (DD d)) = show d
-renderMathExpr (Add a b) = "(" ++ renderMathExpr a ++ ")+(" ++ renderMathExpr b ++ ")"
-renderMathExpr (Sub a b) = "(" ++ renderMathExpr a ++ ")-(" ++ renderMathExpr b ++ ")"
-renderMathExpr (Mul a b) = "(" ++ renderMathExpr a ++ ")*(" ++ renderMathExpr b ++ ")"
-renderMathExpr (Div a b) = "(" ++ renderMathExpr a ++ ")/(" ++ renderMathExpr b ++ ")"
+instance RenderColName TabColName where
+  renderColName (TCN Nothing (CN s)) = s
+  renderColName (TCN (Just (TN t)) (CN c)) = t ++ "." ++ c
 
-renderMathExpr (FnCall (Sum c)) = "SUM(" ++ renderTabColName c ++ ")"
-renderMathExpr (FnCall (Avg c)) = "AVG(" ++ renderTabColName c ++ ")"
-renderMathExpr (FnCall (Cnt c)) = "CNT(" ++ renderTabColName c ++ ")"
-renderMathExpr (FnCall (Min c)) = "SIN(" ++ renderTabColName c ++ ")"
-renderMathExpr (FnCall (Max c)) = "SAX(" ++ renderTabColName c ++ ")"
+instance RenderColName ColumnName where
+  renderColName (CN c) = c
 
+instance (RenderColName a) => RenderColName (MathExpr a) where
+  renderColName (Read tcn) = renderColName tcn
+  renderColName (Sca (SS s)) =   "\"" ++ s ++ "\""
+  renderColName (Sca (II i)) = show i
+  renderColName (Sca (DD d)) = show d
+  renderColName (Add a b) = "(" ++ renderColName a ++ ")+(" ++ renderColName b ++ ")"
+  renderColName (Sub a b) = "(" ++ renderColName a ++ ")-(" ++ renderColName b ++ ")"
+  renderColName (Mul a b) = "(" ++ renderColName a ++ ")*(" ++ renderColName b ++ ")"
+  renderColName (Div a b) = "(" ++ renderColName a ++ ")/(" ++ renderColName b ++ ")"
 
---mapMonadMathExpr :: (Monad m) => (a -> m b) -> (MathExpr a) -> m (MathExpr b)
---mapMonadMathExpr f (Read x) = fmap Read (f x)
---mapMonadMathExpr f (Add x y) = fmap (\(a,b)-> Add a b) (f x, f y)
+  renderColName (FnCall (Sum c)) = "SUM(" ++ renderColName c ++ ")"
+  renderColName (FnCall (Avg c)) = "AVG(" ++ renderColName c ++ ")"
+  renderColName (FnCall (Cnt c)) = "CNT(" ++ renderColName c ++ ")"
+  renderColName (FnCall (Min c)) = "SIN(" ++ renderColName c ++ ")"
+  renderColName (FnCall (Max c)) = "SAX(" ++ renderColName c ++ ")"
+
 
 mapMaybeMathExpr :: (a -> Maybe b) -> (MathExpr a) -> Maybe (MathExpr b)
 mapMaybeMathExpr f (Read a) = fmap Read $ f a

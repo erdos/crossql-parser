@@ -3,8 +3,8 @@
 
 module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnMath,
                   SQLParser.parse, runParser, SQLParser.parseLogicTree,
-                  SelectClause, WhereClause, FromClause, SubQuery, JoinCond, TableReference
-                 ) where
+                  SelectClause, WhereClause, FromClause(FromSimple, FromJoined),
+                  SubQuery, JoinCond, TableReference) where
 
 import CNF
 import MathExpr
@@ -26,9 +26,11 @@ type ColumnMath = MathExpr TabColName -- sum(1), etc.
 type TableReference = (Either TableName SubQuery, Maybe TableName)
 
 type JoinCond = (LogicTree (Comp (MathExpr TabColName)))
-type JoinedTable = (TableReference, [(TableReference,  Maybe JoinCond)])
 
-type FromClause = JoinedTable
+data FromClause = FromSimple (Maybe TableName) (Either TableName SubQuery)
+                | FromJoined (Maybe TableName) (Either TableName SubQuery) (Maybe JoinCond) FromClause
+                deriving (Ord, Eq, Show)
+
 type SubQuery = QuerySpec
 
 type WhereClause = LogicTree (CompOrder TabColName (MathExpr TabColName))
@@ -42,6 +44,8 @@ data QuerySpec -- root
   | SFWGH SelectClause FromClause WhereClause GroupByClause HavingClause
   deriving (Eq, Ord, Show)
 
+-- temporary data structure for parsing
+type JoinedTable = (TableReference, [(TableReference,  Maybe JoinCond)])
 
 parseColumnAlias :: Parser ColumnName
 parseColumnAlias = CN <$> parseIdentifier
@@ -133,8 +137,14 @@ parseSubQuery = between (string "(") (string ")") parseSubQuery <|> parseQuerySp
 
   -- TODO: write parsed parser for these types.
 
+mapFromClause :: JoinedTable -> FromClause
+mapFromClause ((eith, mtn), [])
+  = FromSimple mtn eith
+mapFromClause ((eithLeft, mtnLeft), ((eithRight, mtnRight), mjc): xs)
+  = FromJoined mtnLeft eithLeft mjc $ mapFromClause ((eithRight, mtnRight),xs)
+
 parseFromClause :: Parser FromClause
-parseFromClause = parseJoinedTable
+parseFromClause = mapFromClause <$> parseJoinedTable
 
 parseWhereClause :: Parser WhereClause;
 parseWhereClause = SQLParser.parseLogicTree parseTabColName (parseMathExpr parseTabColName)
