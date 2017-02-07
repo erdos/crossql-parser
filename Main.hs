@@ -7,7 +7,7 @@ module Main (main) where
 import SQLParser (parse)
 -- import SQLStrategy (transformer)
 import Util (pr)
-import RelAlg (transform)
+import TextbookRelAlg (transform)
 
 import Control.Monad
 import Text.Parsec (runParser)

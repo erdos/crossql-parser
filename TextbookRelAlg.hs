@@ -37,6 +37,9 @@ data RelAlg = Source TableName -- table name with alias
             | MProjection [ColumnName] RelAlg
             deriving (Eq, Show, Ord)
 
+instance PrClj RelAlg where
+  pr = show
+
 data CleanModel = CS [ColumnName] ColCNF TableName
                 | CInnerJoin CleanModel ColumnName ColumnName CleanModel
                 | CTransform [ColumnName] ColCNF (Map ColumnName ColMath) CleanModel
@@ -97,15 +100,13 @@ selectMapAccum m ra = (Map.fromList mixs, para ra) where
   mTableAlias = getMaybeTableId ra
 
 
-
-{-
 joinSelectMapAccum :: (TabColCNF, Map ColumnName TabColMath)
                    -> RelAlg
-                   -> (TabColCNF, Map ColumnName TabColMath, RelAlg)
-joinSelectMapAccum (tcnf, m) ra = (cnf2, m2, ra3) where
+                   -> ((TabColCNF, Map ColumnName TabColMath), RelAlg)
+joinSelectMapAccum (tcnf, m) ra = ((cnf2, m2), ra3) where
   (m2, ra2) = selectMapAccum m ra
   (cnf2, ra3) = joinMapAccum tcnf ra2
--}
+
 
 -- kiszedi a from klozbol
 preMapBranches :: FromClause -> [RelAlg]
@@ -174,32 +175,24 @@ transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
               ++ concat [collect l ++ collect r
                         | (l,r) <- Data.List.map sides $ predicates selectionCNF]
 
+-- TODO: maybe add projections too
+-- TODO: maybe expand equivalences
+-- TODO: maybe add meta too.
 transform (SFW selectClause fromClause whereClause)
-  = -- Projection undefined $
-  Selection filterCNF
-  $ Rename renameMap
-  $ joined
+  = Selection filterCNF $ Rename renameMap $ joined
   where
-
-    -- TODO: add tablename qualified projections to subqueries
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
-
-    (outmostCNF, joined) = doJoins outerCNF branches2
-
+    (outmostCNF, joined) = doJoins outerCNF branches
     renameMap = Map.map unqualifyMathExpr outerSelectMap
-
-    outerSelectMap :: Map ColumnName TabColMath
-    (outerSelectMap, branches1) = mapAccumL selectMapAccum selMap fromAlgs where
-      selMap = fromList [(renderMathCol cm mcn, cm) | (cm, mcn) <-selectClause]
-      fromAlgs = preMapBranches fromClause
-
-
-    (outerCNF, branches2) = mapAccumL joinMapAccum cnf branches1 where
-      cnf = fromClauses $ clauses wc ++ (fromCnf fromClause)
-      wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
-      fromCnf (FromSimple _ _) = []
-      fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
-      fromCnf (FromJoined _ _ Nothing xs) = fromCnf xs
+    ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
+      where
+        selMap = fromList [(renderMathCol cm mcn, cm) | (cm, mcn) <-selectClause]
+        fromAlgs = preMapBranches fromClause
+        cnf = fromClauses $ clauses wc ++ (fromCnf fromClause) where
+          wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
+          fromCnf (FromSimple _ _) = []
+          fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
+          fromCnf (FromJoined _ _ Nothing xs) = fromCnf xs
 
 transform _ = undefined
 -- TODO:  talan a feltetelek atrendezese kesobbi feladat?
