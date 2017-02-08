@@ -11,7 +11,7 @@
 
 module TextbookRelAlg (RelAlg, transform) where
 
-import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map)
+import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, null)
 import Data.Maybe
 import Data.Either
 import Data.List
@@ -176,7 +176,9 @@ transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
 -- TODO: maybe expand equivalences
 -- TODO: maybe add meta too.
 transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
-  = Selection filterCNF $ Rename renameMap $ joined
+  = (if CNF.null filterCNF then id else Selection filterCNF)
+  $ (if Map.null renameMap then id else Rename renameMap)
+  $ joined
   where
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
     (outmostCNF, joined) = doJoins outerCNF branches
