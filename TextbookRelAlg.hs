@@ -9,7 +9,7 @@
 
 -- http://www.databasteknik.se/webbkursen/relalg-lecture/
 
-module TextbookRelAlg (RelAlg, transform) where
+module TextbookRelAlg (pipeline, CleanModel) where
 
 import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, null)
 import Data.Maybe
@@ -37,13 +37,34 @@ data RelAlg = Source TableName -- table name with alias
             | MProjection [ColumnName] RelAlg
             deriving (Eq, Show, Ord)
 
-instance PrClj RelAlg where
-  pr = show
-
-data CleanModel = CS [ColumnName] ColCNF TableName
+data CleanModel = CS [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
                 | CInnerJoin CleanModel ColumnName ColumnName CleanModel
                 | CTransform [ColumnName] ColCNF (Map ColumnName ColMath) CleanModel
+                --  TODO: grouping node too
                 deriving (Eq, Show, Ord)
+
+data TransformError = TError String
+
+instance PrClj CleanModel where
+  pr (CS cols cnf (TN tn))
+    = "{:keep [" ++ concat [" " ++ show col ++ "" | (CN col) <- cols] ++ " ] "
+      ++ ":from " ++ "\"" ++ show tn ++ "\""
+      ++ " :where " ++ pr cnf ++ "}"
+  pr (CInnerJoin left (CN cnLeft) (CN cnRight) right)
+    = "{:left " ++ pr left
+      ++ " :right " ++ pr right
+      ++ " :left-col " ++ cnLeft
+      ++ " :right-col " ++ cnRight
+      ++ "}"
+  pr (CTransform cols cnf m source) =
+    "{:keep " ++ concat [" " ++ col ++ " " | (CN col) <- cols]
+    ++ ":filter " ++ pr cnf
+    ++ ":map " ++ pr m
+    ++ ":source " ++ pr source
+    ++ "}"
+
+instance PrClj TransformError where
+  pr (TError msg) = "{:error " ++ show msg ++ "}"
 
 getMaybeTableId :: RelAlg -> Maybe TableName
 getMaybeTableId (Source tn) = Just tn
@@ -196,3 +217,38 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
 transform (SFWG _ _ _ _) = undefined
 
 transform (SFWGH _ _ _ _ _) = undefined
+
+-- maybe keep them instead
+-- TODO: maybe clean MTableAlias nodes or wtf
+cleanMetaNodes :: RelAlg -> RelAlg
+cleanMetaNodes (MTableAlias _ r) = r
+cleanMetaNodes node@(Source _) = node
+cleanMetaNodes (MProjection _ r) = r
+cleanMetaNodes (Projection p r) = Projection p $ cleanMetaNodes r
+cleanMetaNodes (Rename r n) = Rename r $ cleanMetaNodes n
+cleanMetaNodes (Selection s n) = Selection s $ cleanMetaNodes n
+cleanMetaNodes (InnerJoin t1 a b t2) = InnerJoin (cleanMetaNodes t1) a b (cleanMetaNodes t2)
+
+-- transforming
+transformToClean :: RelAlg -> Either TransformError CleanModel
+
+-- projekciokat kette kell vagni.
+transformToClean n@(Projection _ (Selection _ (Rename _ (Source _)))) =
+  Left $ TError $ "Should be a simple one!" ++ show n
+  --undefined p s r tn-- valami ilyesmi konstrukciobol fogunk epitkezni!
+
+
+-- selection kifejezesbol levalogatjuk a balra rendezett CNF kereseket
+-- azokat, amelyek egyeru identitas rename-eket hasznalnak. a rename szabalyok jobb oldalabol egyebkent is kijon, hogy
+-- mely oszopnevek kellenek (+ selection szabalyokbol is) es azokra lehet a lekerest inditani.
+
+-- es azokbol epitunk egy belso csomopontot (kozvetlen lekerest)
+-- a tobbibol pedig egy kulso csomopontot (transzformacio lekeres)
+
+--transformToClean (Projection p (Selection s (Rename r ())))
+
+transformToClean x = Left $ TError $ "Unexpected node: " ++ show x
+
+
+pipeline :: QuerySpec -> Either TransformError CleanModel
+pipeline =  transformToClean . cleanMetaNodes . transform

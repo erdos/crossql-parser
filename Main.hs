@@ -7,7 +7,7 @@ module Main (main) where
 import SQLParser (parse)
 -- import SQLStrategy (transformer)
 import Util (pr)
-import TextbookRelAlg (transform)
+import TextbookRelAlg (pipeline)
 
 import Control.Monad
 import Text.Parsec (runParser)
@@ -17,7 +17,7 @@ handleLine :: String -> String
 handleLine line =
   case runParser parse () "" line of
     (Left pe) -> pr pe
-    (Right b) -> pr $ transform b
+    (Right b) -> either pr pr (pipeline b)
 
 main :: IO ()
 main = do
