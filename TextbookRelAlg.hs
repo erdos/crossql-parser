@@ -48,7 +48,7 @@ data TransformError = TError String
 instance PrClj CleanModel where
   pr (CS cols cnf (TN tn))
     = "{:keep [" ++ concat [" " ++ show col ++ "" | (CN col) <- cols] ++ " ] "
-      ++ ":from " ++ "\"" ++ show tn ++ "\""
+      ++ ":from " ++ show tn
       ++ " :where " ++ pr cnf ++ "}"
   pr (CInnerJoin left (CN cnLeft) (CN cnRight) right)
     = "{:left " ++ pr left
@@ -57,7 +57,7 @@ instance PrClj CleanModel where
       ++ " :right-col " ++ cnRight
       ++ "}"
   pr (CTransform cols cnf m source) =
-    "{:keep " ++ concat [" " ++ col ++ " " | (CN col) <- cols]
+    "{:keep [" ++ concat [" " ++ show col ++ " " | (CN col) <- cols] ++ " ]"
     ++ ":filter " ++ pr cnf
     ++ ":map " ++ pr m
     ++ ":source " ++ pr source
@@ -229,12 +229,39 @@ cleanMetaNodes (Rename r n) = Rename r $ cleanMetaNodes n
 cleanMetaNodes (Selection s n) = Selection s $ cleanMetaNodes n
 cleanMetaNodes (InnerJoin t1 a b t2) = InnerJoin (cleanMetaNodes t1) a b (cleanMetaNodes t2)
 
+splitComp :: (Ord a) => PosCNF (Comp (MathExpr a))
+          -> (PosCNF (CompOrder a SomeScalar), PosCNF (Comp (MathExpr a)))
+splitComp cnf = (fromClauses selected, fromClauses rest) where
+  (rest, selected) = partitionEithers $ Data.List.map f $ clauses cnf
+  f clause = case maybeAll (Data.List.map ff clause) of
+    Nothing -> Left clause
+    (Just newClause) -> Right newClause
+  ff predicate = case sides predicate of
+    (Read x, Sca s) -> Just $ replaceSides x s predicate
+    (Sca s, Read x) -> Just $ Comp.flip $ replaceSides s x predicate
+    _ -> Nothing
+
+isProjIdentity :: (Map ColumnName ColMath) -> Bool
+isProjIdentity m = and [(v == (Read k)) | (k, v) <- Map.assocs m]
+
 -- transforming
 transformToClean :: RelAlg -> Either TransformError CleanModel
 
 -- projekciokat kette kell vagni.
-transformToClean n@(Projection _ (Selection _ (Rename _ (Source _)))) =
-  Left $ TError $ "Should be a simple one!" ++ show n
+transformToClean (Projection projection (Selection selection (Rename rename (Source table)))) =
+  -- Left $ TError $ "Should be a simple one!" ++ show n
+  Right
+  $ (if projection==tables && isProjIdentity rename && CNF.null restCNF
+      then id
+      else  CTransform projection restCNF rename)
+  $ CS tables sourceCNF table
+  where
+    (sourceCNF, restCNF) = splitComp selection
+
+    tables = unique $ (concatMap collect $ Map.elems rename)
+             ++ concatMap (concatMapSides collect) (predicates restCNF)
+
+
   --undefined p s r tn-- valami ilyesmi konstrukciobol fogunk epitkezni!
 
 
