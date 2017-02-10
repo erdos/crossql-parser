@@ -257,7 +257,6 @@ transformToClean (Projection projection (Selection selection (Rename rename (Sou
   $ CS tables sourceCNF table
   where
     (sourceCNF, restCNF) = splitComp selection
-
     tables = unique $ (concatMap collect $ Map.elems rename)
              ++ concatMap (concatMapSides collect) (predicates restCNF)
 
