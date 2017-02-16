@@ -46,11 +46,11 @@ instance PrClj TabColName where
   pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ tn ++ "\" \""++ cn ++ "\")"
 
 instance PrClj ParseError where
-  pr pe = "{"
+  pr pe = "{:error {"
           ++ kv ":expected" expects
           ++ kv ":unexpected" unexpected
           ++ kv ":messages"   messages
-          ++  "}"
+          ++  "}}"
     where
       kv k v = " " ++ k ++ " [" ++ unwords (map show $ delete "" $ nub v) ++ "]"
       expects = [s | Expect s <- errorMessages pe]
