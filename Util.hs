@@ -36,14 +36,14 @@ instance (PrClj a) => PrClj [a] where
   pr l = "[" ++ unwords (map pr l) ++ "]"
 
 instance PrClj ColumnName where
-  pr (CN cn) = "(cn\"" ++ cn ++ "\")"
+  pr (CN cn) = "(cn\"" ++ show cn ++ "\")"
 
 instance PrClj TableName where
-  pr (TN cn) = "(tn\"" ++ cn ++ "\")"
+  pr (TN cn) = "(tn\"" ++ show cn ++ "\")"
 
 instance PrClj TabColName where
-  pr (TCN Nothing (CN cn)) = "(tcn nil \"" ++ cn ++ "\")"
-  pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ tn ++ "\" \""++ cn ++ "\")"
+  pr (TCN Nothing (CN cn)) = "(tcn nil \"" ++ show cn ++ "\")"
+  pr (TCN (Just (TN tn)) (CN cn))  = "(tcn\"" ++ show tn ++ "\" \""++ show cn ++ "\")"
 
 instance PrClj ParseError where
   pr pe = "{:error {"
