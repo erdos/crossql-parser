@@ -130,13 +130,16 @@ joinSelectMapAccum (tcnf, m) ra = ((cnf2, m2), ra3) where
   (m2, ra2) = selectMapAccum m ra
   (cnf2, ra3) = joinMapAccum tcnf ra2
 
+wrapMaybeAlias :: Maybe TableName -> RelAlg -> RelAlg
+wrapMaybeAlias Nothing x = x
+wrapMaybeAlias (Just tn) x = MTableAlias tn x
 
--- kiszedi a from klozbol
+-- kiszedi a from klozbol -- TODO: add table alias here.
 preMapBranches :: FromClause -> [RelAlg]
-preMapBranches (FromSimple _ (Left tn)) = [Source tn]
-preMapBranches (FromSimple _ (Right sq)) = [transform sq]
-preMapBranches (FromJoined _ (Left tn) _ xt) = (Source tn) : (preMapBranches xt)
-preMapBranches (FromJoined _ (Right sq) _ xs) = (transform sq) : (preMapBranches xs)
+preMapBranches (FromSimple mtn (Left tn)) = [wrapMaybeAlias mtn $ Source tn]
+preMapBranches (FromSimple mtn (Right sq)) = [wrapMaybeAlias mtn $ transform sq]
+preMapBranches (FromJoined mtn (Left tn) _ xt) = (wrapMaybeAlias mtn $ Source tn) : (preMapBranches xt)
+preMapBranches (FromJoined mtn (Right sq) _ xs) = (wrapMaybeAlias mtn $ transform sq) : (preMapBranches xs)
 
 -- findJoinConds :: FromClause -> (TabColCNF, [(ColumnName, ColumnName)])
 
@@ -146,7 +149,7 @@ mapWhereClause w = (mapPredicates (mapSides (Read . colName) (fmap colName)) $ t
 
 -- TODO: add maybe stuff or error reporting at least.
 doJoins :: TabColCNF -> [RelAlg] -> (TabColCNF, RelAlg)
-doJoins _ [] = undefined
+doJoins _ [] = error "illegal arg"
 doJoins cnf [ra] = (cnf, ra)
 doJoins cnf (a: b: relalgs) = (finalCNF, InnerJoin a c1 c2 jj) where
   (Just at) = getMaybeTableId a
@@ -155,10 +158,14 @@ doJoins cnf (a: b: relalgs) = (finalCNF, InnerJoin a c1 c2 jj) where
   (finalCNF, jj) = doJoins (fromClauses restClauses) (b:relalgs)
 
   (c1, c2, restClauses) = f $ clauses cnf
-  f [] = undefined
+  f [] = error "did not find clause to join on."
   f (x:xxs) = case x of
     [(CEQ (Read (TCN (Just t1) cc1))
           (Read (TCN (Just t2) cc2)))] |
+      (and [(t1 == at), (t2 == bt)])
+      -> (cc1, cc2, xxs)
+    [(CEQ (Read (TCN (Just t2) cc2))
+          (Read (TCN (Just t1) cc1)))] |
       (and [(t1 == at), (t2 == bt)])
       -> (cc1, cc2, xxs)
     _ -> (cc1, cc2, x:ys) where (cc1, cc2, ys) = f xxs
@@ -260,18 +267,9 @@ transformToClean (Projection projection (Selection selection (Rename rename (Sou
     tables = unique $ (concatMap collect $ Map.elems rename)
              ++ concatMap (concatMapSides collect) (predicates restCNF)
 
+--TODO: impl me:
+-- select m1.a,m2.b from mama as m1 join mama as m2 on m1.c==m2.d where m1.x==2 and m2.y==4
 
-  --undefined p s r tn-- valami ilyesmi konstrukciobol fogunk epitkezni!
-
-
--- selection kifejezesbol levalogatjuk a balra rendezett CNF kereseket
--- azokat, amelyek egyeru identitas rename-eket hasznalnak. a rename szabalyok jobb oldalabol egyebkent is kijon, hogy
--- mely oszopnevek kellenek (+ selection szabalyokbol is) es azokra lehet a lekerest inditani.
-
--- es azokbol epitunk egy belso csomopontot (kozvetlen lekerest)
--- a tobbibol pedig egy kulso csomopontot (transzformacio lekeres)
-
---transformToClean (Projection p (Selection s (Rename r ())))
 
 transformToClean x = Left $ TError $ "Unexpected node: " ++ show x
 
