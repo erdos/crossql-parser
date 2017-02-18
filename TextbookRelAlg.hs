@@ -97,6 +97,10 @@ clauseAllRead :: Comp (MathExpr a) -> [a]
 clauseAllRead c = collect a ++ collect b where
   (a,b) = sides c
 
+-- addColumnToRelAlg :: ColumnName -> ColumnName -> RelAlg -> RelAlg
+-- addColumnToRelAlg alias colnamee ra = undefined
+
+
 -- levalogatja azokat a klozokat, amik csak erre a reszfara szolnak es hozzaadja a relalg kifejezehez.
 joinMapAccum :: TabColCNF -> RelAlg -> (TabColCNF, RelAlg)
 joinMapAccum tcnf ra = (fromClauses mixs, para ra) where
@@ -147,11 +151,16 @@ preMapBranches (FromJoined mtn (Right sq) _ xs) = (wrapMaybeAlias mtn $ transfor
 mapWhereClause :: WhereClause -> PosCNF (Comp ColMath)
 mapWhereClause w = (mapPredicates (mapSides (Read . colName) (fmap colName)) $ treeToPosCnf w)
 
+-- TODO: legyen a join condition-ban hasznalt oszlopnev benne mindket agban.
+
 -- TODO: add maybe stuff or error reporting at least.
 doJoins :: TabColCNF -> [RelAlg] -> (TabColCNF, RelAlg)
 doJoins _ [] = error "illegal arg"
 doJoins cnf [ra] = (cnf, ra)
-doJoins cnf (a: b: relalgs) = (finalCNF, InnerJoin a c1 c2 jj) where
+doJoins cnf (a : b : relalgs) = (finalCNF, inner) where
+
+  inner = InnerJoin a c1 c2 jj
+
   (Just at) = getMaybeTableId a
   (Just bt) = getMaybeTableId b
 
@@ -170,6 +179,7 @@ doJoins cnf (a: b: relalgs) = (finalCNF, InnerJoin a c1 c2 jj) where
       -> (cc1, cc2, xxs)
     _ -> (cc1, cc2, x:ys) where (cc1, cc2, ys) = f xxs
 
+-- doJoins a b = error $ "Illegal case" ++ show a ++ show b
 
 {-
 -- tranzitiv lezart.
@@ -210,6 +220,21 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
   where
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
     (outmostCNF, joined) = doJoins outerCNF branches
+    -- itt az outerCNF-beli oszlopneveken vegig lehet menni meg1x
+    -- es megbizonyosodni rola h benne vannak a joined-ben
+
+    --joinedWithAllCols = foldl (\jned col -> jned) joined allcols
+    --allcols = []
+
+    {-
+    ensureContains :: RelAlg -> TabColName -> ColumnName -> RelAlg
+    ensureContains src@(Source _) _ _ = src
+    ensureContains (Projection p ra) tcn cn = Projection (cn: p) $ ensureContains ra tcn cn
+    ensureContains (Selection cnf ra) tcn cn = Selection cnf $ ensureContains ra tcn cn
+    ensureContains (Rename m ra) tcn cn = Rename m ra -- TODO: add rename
+    ensureContains (InnerJoin ra a b rb) = undefined
+    -}
+
     renameMap = Map.map unqualifyMathExpr outerSelectMap
     ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
       where
@@ -228,9 +253,9 @@ transform (SFWGH _ _ _ _ _) = undefined
 -- maybe keep them instead
 -- TODO: maybe clean MTableAlias nodes or wtf
 cleanMetaNodes :: RelAlg -> RelAlg
-cleanMetaNodes (MTableAlias _ r) = r
+cleanMetaNodes (MTableAlias _ r) = cleanMetaNodes r
 cleanMetaNodes node@(Source _) = node
-cleanMetaNodes (MProjection _ r) = r
+cleanMetaNodes (MProjection _ r) = cleanMetaNodes r
 cleanMetaNodes (Projection p r) = Projection p $ cleanMetaNodes r
 cleanMetaNodes (Rename r n) = Rename r $ cleanMetaNodes n
 cleanMetaNodes (Selection s n) = Selection s $ cleanMetaNodes n
@@ -277,6 +302,9 @@ transformToClean arg@(Selection _ (Rename projmap (Source _)))
 
   select m1.ga:sessions,m1.ga:date, m2.ga:sessions from mama as m1 join mama as m2 on m1.ga:date==m2.ga:date where m1.ga:date between "2017-01-01" and "2017-02-01" and m2.ga:date between "2017-01-01" and "2017-02-01"
 
+
+  should produce minimal result:
+  select a from t as tt where t.c==3
 -}
 
 
