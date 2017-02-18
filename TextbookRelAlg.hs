@@ -267,8 +267,24 @@ transformToClean (Projection projection (Selection selection (Rename rename (Sou
     tables = unique $ (concatMap collect $ Map.elems rename)
              ++ concatMap (concatMapSides collect) (predicates restCNF)
 
---TODO: impl me:
--- select m1.a,m2.b from mama as m1 join mama as m2 on m1.c==m2.d where m1.x==2 and m2.y==4
+transformToClean arg@(Selection _ (Rename projmap (Source _)))
+  = transformToClean $ Projection cols arg where
+  cols = Map.keys projmap -- just a bugfix, needs to test it.
+
+{- TODO: test cases
+  select m1.a,m2.b from mama as m1 join mama as m2 on m1.c==m2.d where m1.x==2 and m2.y==4
+  select m1.a,m2.b from mama as m1 join mama as m2 on m2.c==m1.d where m1.x==2 and m2.y==4
+
+  select m1.ga:sessions,m1.ga:date, m2.ga:sessions from mama as m1 join mama as m2 on m1.ga:date==m2.ga:date where m1.ga:date between "2017-01-01" and "2017-02-01" and m2.ga:date between "2017-01-01" and "2017-02-01"
+
+-}
+
+
+transformToClean (InnerJoin left colLeft colRight right) =
+  case (transformToClean left, transformToClean right) of
+    (Right leftC, Right rightC) -> Right $ CInnerJoin leftC colLeft colRight rightC
+    (Left err, _) -> Left err
+    (_, Left err) -> Left err
 
 
 transformToClean x = Left $ TError $ "Unexpected node: " ++ show x
