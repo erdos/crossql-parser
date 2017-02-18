@@ -11,7 +11,7 @@
 
 module TextbookRelAlg (pipeline, CleanModel) where
 
-import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, null)
+import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, insert)
 import Data.Maybe
 import Data.Either
 import Data.List
@@ -53,8 +53,8 @@ instance PrClj CleanModel where
   pr (CInnerJoin left (CN cnLeft) (CN cnRight) right)
     = "{:left " ++ pr left
       ++ " :right " ++ pr right
-      ++ " :left-col " ++ cnLeft
-      ++ " :right-col " ++ cnRight
+      ++ " :left-col " ++ show cnLeft
+      ++ " :right-col " ++ show cnRight
       ++ "}"
   pr (CTransform cols cnf m source) =
     "{:keep [" ++ concat [" " ++ show col ++ " " | (CN col) <- cols] ++ " ]"
@@ -92,6 +92,8 @@ renderMathCol cm mcn = fromMaybe (CN (renderColName cm)) mcn
 unqualifyMathExpr :: TabColMath -> ColMath
 unqualifyMathExpr = fmap (CN . renderColName)
 
+unqualifyTCN :: TabColName -> ColumnName
+unqualifyTCN = CN . renderColName
 
 clauseAllRead :: Comp (MathExpr a) -> [a]
 clauseAllRead c = collect a ++ collect b where
@@ -159,7 +161,7 @@ doJoins _ [] = error "illegal arg"
 doJoins cnf [ra] = (cnf, ra)
 doJoins cnf (a : b : relalgs) = (finalCNF, inner) where
 
-  inner = InnerJoin a c1 c2 jj
+  inner = InnerJoin a (unqualifyTCN c1) (unqualifyTCN c2) jj
 
   (Just at) = getMaybeTableId a
   (Just bt) = getMaybeTableId b
@@ -169,12 +171,12 @@ doJoins cnf (a : b : relalgs) = (finalCNF, inner) where
   (c1, c2, restClauses) = f $ clauses cnf
   f [] = error "did not find clause to join on."
   f (x:xxs) = case x of
-    [(CEQ (Read (TCN (Just t1) cc1))
-          (Read (TCN (Just t2) cc2)))] |
+    [(CEQ (Read cc1@(TCN (Just t1) _))
+          (Read cc2@(TCN (Just t2) _)))] |
       (and [(t1 == at), (t2 == bt)])
       -> (cc1, cc2, xxs)
-    [(CEQ (Read (TCN (Just t2) cc2))
-          (Read (TCN (Just t1) cc1)))] |
+    [(CEQ (Read cc2@(TCN (Just t2) _))
+          (Read cc1@(TCN (Just t1) _)))] |
       (and [(t1 == at), (t2 == bt)])
       -> (cc1, cc2, xxs)
     _ -> (cc1, cc2, x:ys) where (cc1, cc2, ys) = f xxs
@@ -190,6 +192,43 @@ expandEquivalences = undefined
 addMProjection :: RelAlg -> RelAlg
 addMProjection = undefined
 -}
+
+
+-- TODO: concept only, find bugs in it!
+ensureContains :: RelAlg -> TabColName -> ColumnName -> RelAlg
+ensureContains (Rename ren (MProjection mproj (Source src))) (TCN _ cn) acn
+  = Rename (Map.insert acn (Read cn) ren)
+  $ MProjection (cn : mproj)
+  $ Source src -- TODO: assert TN == source (or maybe some alias whatever)
+ensureContains (Selection sel (Rename ren (MTableAlias ali (Source src)))) (TCN _ cn) acn
+  = Selection sel
+  $ Rename (Map.insert acn (Read cn) ren)
+  $ MTableAlias ali
+  $ Source src -- TODO: assert TN == source or alias (?)
+ensureContains (Selection sel (Rename ren (Source src))) (TCN _ cn) acn
+  = Selection sel
+  $ Rename (Map.insert acn (Read cn) ren)
+  $ Source src -- TODO: assert TN == source or alias (?)
+
+{-
+ensureContains (Projection p (Rename ren (Source src))) (TCN _ cn) acn
+  = Projection (cn : p)
+  $ Rename (Map.insert acn (Read cn) ren)
+  $ Source src -- TODO: assert TN == source or alias (?)
+-}
+
+ensureContains (Projection p ra) tcn cn = Projection (cn : p) $ ensureContains ra tcn cn
+-- ensureContains (Selection cnf ra) tcn cn = Selection cnf $ ensureContains ra tcn cn
+-- ensureContains (Rename m ra) tcn cn = Rename m $ ensureContains ra tcn cn
+ensureContains (InnerJoin ra a b rb) (TCN tn cn) acn | tn == getMaybeTableId ra
+  = InnerJoin (ensureContains ra (TCN tn cn) acn) a b rb
+ensureContains (InnerJoin ra a b rb) (TCN tn cn) acn | tn == getMaybeTableId rb
+  = InnerJoin ra a b (ensureContains rb (TCN tn cn) acn)
+ensureContains (MTableAlias mta x) a b = MTableAlias mta $ ensureContains x a b
+
+-- todo: egyeb agak is elofordulhatnak.
+ensureContains x _ _ = error $ "Unexpected " ++ show x
+
 
 transform :: QuerySpec -> RelAlg
 
@@ -214,27 +253,22 @@ transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
 -- TODO: maybe expand equivalences
 -- TODO: maybe add meta too.
 transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
-  = (if CNF.null filterCNF then id else Selection filterCNF)
-  $ (if Map.null renameMap then id else Rename renameMap)
-  $ joined
+  = Projection preProjection
+  $ Selection filterCNF --(if CNF.null filterCNF then id else Selection filterCNF)
+  $ Rename renameMap -- (if Map.null renameMap then id else Rename renameMap)
+  $ newJoined -- joined
   where
+
+    -- make uo from projection only
+    preProjection = [ renderMathCol cm mcn | (cm, mcn) <- selectClause]
+
+    -- outercnf -> seq of col names
+    newJoined = foldl (\branch tcn -> ensureContains branch tcn (unqualifyTCN tcn)) joined colnames where
+      colnames = concatMap (concatMapSides collect) (predicates outerCNF) :: [TabColName]
+
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
     (outmostCNF, joined) = doJoins outerCNF branches
-    -- itt az outerCNF-beli oszlopneveken vegig lehet menni meg1x
-    -- es megbizonyosodni rola h benne vannak a joined-ben
-
-    --joinedWithAllCols = foldl (\jned col -> jned) joined allcols
-    --allcols = []
-
-    {-
-    ensureContains :: RelAlg -> TabColName -> ColumnName -> RelAlg
-    ensureContains src@(Source _) _ _ = src
-    ensureContains (Projection p ra) tcn cn = Projection (cn: p) $ ensureContains ra tcn cn
-    ensureContains (Selection cnf ra) tcn cn = Selection cnf $ ensureContains ra tcn cn
-    ensureContains (Rename m ra) tcn cn = Rename m ra -- TODO: add rename
-    ensureContains (InnerJoin ra a b rb) = undefined
-    -}
-
+    -- otlet:
     renameMap = Map.map unqualifyMathExpr outerSelectMap
     ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
       where
@@ -295,6 +329,11 @@ transformToClean (Projection projection (Selection selection (Rename rename (Sou
 transformToClean arg@(Selection _ (Rename projmap (Source _)))
   = transformToClean $ Projection cols arg where
   cols = Map.keys projmap -- just a bugfix, needs to test it.
+
+transformToClean (Projection projectionCols (Selection selectionCNF (Rename renameMap source)))
+  = case transformToClean source of
+      Right clean -> Right $ CTransform projectionCols selectionCNF renameMap clean
+      Left err -> Left err
 
 {- TODO: test cases
   select m1.a,m2.b from mama as m1 join mama as m2 on m1.c==m2.d where m1.x==2 and m2.y==4
