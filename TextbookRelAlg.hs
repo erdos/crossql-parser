@@ -37,6 +37,10 @@ data RelAlg = Source TableName -- table name with alias
             | MProjection [ColumnName] RelAlg
             deriving (Eq, Show, Ord)
 
+-- todo: use these constructors only
+buildProjectSelectRename :: [ColumnName] -> ColCNF -> (Map ColumnName ColMath) -> RelAlg -> RelAlg
+buildProjectSelectRename a b c rel = Projection a $ Selection b $ Rename c rel
+
 data CleanModel = CS [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
                 | CInnerJoin CleanModel ColumnName ColumnName CleanModel
                 | CTransform [ColumnName] ColCNF (Map ColumnName ColMath) CleanModel
@@ -219,9 +223,7 @@ transform :: QuerySpec -> RelAlg
 -- SELECT ... FROM . WHERE ...
 transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
   = (maybe id MTableAlias maybeTableAlias)
-  $ Projection (keys renameMap)
-  $ Selection selectionCNF
-  $ Rename renameMap
+  $ buildProjectSelectRename (keys renameMap) selectionCNF renameMap
   $ MProjection mproj
   $ (either Source transform source)
     where
@@ -237,10 +239,7 @@ transform (SFW selectClause (FromSimple maybeTableAlias source) whereClause)
 -- TODO: maybe expand equivalences
 -- TODO: maybe add meta too.
 transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
-  = Projection preProjection
-  $ Selection filterCNF --(if CNF.null filterCNF then id else Selection filterCNF)
-  $ Rename renameMap -- (if Map.null renameMap then id else Rename renameMap)
-  $ newJoined -- joined
+  = buildProjectSelectRename preProjection filterCNF renameMap newJoined
   where
 
     -- make uo from projection only
