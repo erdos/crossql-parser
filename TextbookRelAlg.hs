@@ -99,10 +99,6 @@ clauseAllRead :: Comp (MathExpr a) -> [a]
 clauseAllRead c = collect a ++ collect b where
   (a,b) = sides c
 
--- addColumnToRelAlg :: ColumnName -> ColumnName -> RelAlg -> RelAlg
--- addColumnToRelAlg alias colnamee ra = undefined
-
-
 -- levalogatja azokat a klozokat, amik csak erre a reszfara szolnak es hozzaadja a relalg kifejezehez.
 joinMapAccum :: TabColCNF -> RelAlg -> (TabColCNF, RelAlg)
 joinMapAccum tcnf ra = (fromClauses mixs, para ra) where
@@ -115,7 +111,6 @@ joinMapAccum tcnf ra = (fromClauses mixs, para ra) where
     | clause <- clauses tcnf]
 
   mTableAlias = getMaybeTableId ra
-
 
 -- legalogatja azokat a szelekteket, amik csak ebbol a tablabol kerdeznek le.
 selectMapAccum :: (Map ColumnName TabColMath) -> RelAlg -> (Map ColumnName TabColMath, RelAlg)
@@ -130,8 +125,7 @@ selectMapAccum m ra = (Map.fromList mixs, para ra) where
 
 
 joinSelectMapAccum :: (TabColCNF, Map ColumnName TabColMath)
-                   -> RelAlg
-                   -> ((TabColCNF, Map ColumnName TabColMath), RelAlg)
+                   -> RelAlg -> ((TabColCNF, Map ColumnName TabColMath), RelAlg)
 joinSelectMapAccum (tcnf, m) ra = ((cnf2, m2), ra3) where
   (m2, ra2) = selectMapAccum m ra
   (cnf2, ra3) = joinMapAccum tcnf ra2
@@ -147,13 +141,26 @@ preMapBranches (FromSimple mtn (Right sq)) = [wrapMaybeAlias mtn $ transform sq]
 preMapBranches (FromJoined mtn (Left tn) _ xt) = (wrapMaybeAlias mtn $ Source tn) : (preMapBranches xt)
 preMapBranches (FromJoined mtn (Right sq) _ xs) = (wrapMaybeAlias mtn $ transform sq) : (preMapBranches xs)
 
--- findJoinConds :: FromClause -> (TabColCNF, [(ColumnName, ColumnName)])
-
-
 mapWhereClause :: WhereClause -> PosCNF (Comp ColMath)
 mapWhereClause w = (mapPredicates (mapSides (Read . colName) (fmap colName)) $ treeToPosCnf w)
 
--- TODO: legyen a join condition-ban hasznalt oszlopnev benne mindket agban.
+findEquivalence :: (TableName, TableName, TabColCNF) -> Maybe (TabColName, TabColName, TabColCNF)
+findEquivalence (at, bt, cnf) = case f $ clauses cnf of
+  Just (colLeft, colRight, cls) -> Just (colLeft, colRight, fromClauses cls)
+  Nothing -> Nothing
+  where
+    f ([(CEQ (Read cc1@(TCN (Just t1) _))
+             (Read cc2@(TCN (Just t2) _)))]: xxs)
+      | (and [(t1 == at), (t2 == bt)])
+      =  Just (cc1, cc2, xxs)
+    f ([(CEQ (Read cc2@(TCN (Just t2) _))
+             (Read cc1@(TCN (Just t1) _)))]: xxs)
+      | (and [(t1 == at), (t2 == bt)])
+      = Just (cc1, cc2, xxs)
+    f (x: xxs)
+      | Just (cc1, cc2, ys) <- f xxs
+      = Just (cc1, cc2, x:ys)
+    f _ = Nothing
 
 -- TODO: add maybe stuff or error reporting at least.
 doJoins :: TabColCNF -> [RelAlg] -> (TabColCNF, RelAlg)
@@ -166,22 +173,10 @@ doJoins cnf (a : b : relalgs) = (finalCNF, inner) where
   (Just at) = getMaybeTableId a
   (Just bt) = getMaybeTableId b
 
-  (finalCNF, jj) = doJoins (fromClauses restClauses) (b:relalgs)
+  (finalCNF, jj) = doJoins restCNF (b:relalgs)
 
-  (c1, c2, restClauses) = f $ clauses cnf
-  f [] = error "did not find clause to join on."
-  f (x:xxs) = case x of
-    [(CEQ (Read cc1@(TCN (Just t1) _))
-          (Read cc2@(TCN (Just t2) _)))] |
-      (and [(t1 == at), (t2 == bt)])
-      -> (cc1, cc2, xxs)
-    [(CEQ (Read cc2@(TCN (Just t2) _))
-          (Read cc1@(TCN (Just t1) _)))] |
-      (and [(t1 == at), (t2 == bt)])
-      -> (cc1, cc2, xxs)
-    _ -> (cc1, cc2, x:ys) where (cc1, cc2, ys) = f xxs
+  Just (c1, c2, restCNF) = findEquivalence (at, bt, cnf)
 
--- doJoins a b = error $ "Illegal case" ++ show a ++ show b
 
 {-
 -- tranzitiv lezart.
@@ -193,8 +188,7 @@ addMProjection :: RelAlg -> RelAlg
 addMProjection = undefined
 -}
 
-
--- TODO: concept only, find bugs in it!
+-- TODO: debug to cover all cases
 ensureContains :: RelAlg -> TabColName -> ColumnName -> RelAlg
 ensureContains (Rename ren (MProjection mproj (Source src))) (TCN _ cn) acn
   = Rename (Map.insert acn (Read cn) ren)
@@ -209,14 +203,6 @@ ensureContains (Selection sel (Rename ren (Source src))) (TCN _ cn) acn
   = Selection sel
   $ Rename (Map.insert acn (Read cn) ren)
   $ Source src -- TODO: assert TN == source or alias (?)
-
-{-
-ensureContains (Projection p (Rename ren (Source src))) (TCN _ cn) acn
-  = Projection (cn : p)
-  $ Rename (Map.insert acn (Read cn) ren)
-  $ Source src -- TODO: assert TN == source or alias (?)
--}
-
 ensureContains (Projection p ra) tcn cn = Projection (cn : p) $ ensureContains ra tcn cn
 -- ensureContains (Selection cnf ra) tcn cn = Selection cnf $ ensureContains ra tcn cn
 -- ensureContains (Rename m ra) tcn cn = Rename m $ ensureContains ra tcn cn
@@ -225,9 +211,7 @@ ensureContains (InnerJoin ra a b rb) (TCN tn cn) acn | tn == getMaybeTableId ra
 ensureContains (InnerJoin ra a b rb) (TCN tn cn) acn | tn == getMaybeTableId rb
   = InnerJoin ra a b (ensureContains rb (TCN tn cn) acn)
 ensureContains (MTableAlias mta x) a b = MTableAlias mta $ ensureContains x a b
-
--- todo: egyeb agak is elofordulhatnak.
-ensureContains x _ _ = error $ "Unexpected " ++ show x
+ensureContains x _ _ = error $ "Unexpected " ++ show x -- todo: egyeb agak is elofordulhatnak.
 
 
 transform :: QuerySpec -> RelAlg
@@ -263,9 +247,8 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
     preProjection = [ renderMathCol cm mcn | (cm, mcn) <- selectClause]
 
     -- outercnf -> seq of col names
-    newJoined = foldl (\branch tcn -> ensureContains branch tcn (unqualifyTCN tcn)) joined colnames where
-      colnames = concatMap (concatMapSides collect) (predicates outerCNF) :: [TabColName]
-
+    newJoined = foldl (\branch tcn -> ensureContains branch tcn (unqualifyTCN tcn)) joined colnames
+      where colnames = concatMap (concatMapSides collect) (predicates outerCNF)
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
     (outmostCNF, joined) = doJoins outerCNF branches
     -- otlet:
@@ -335,24 +318,11 @@ transformToClean (Projection projectionCols (Selection selectionCNF (Rename rena
       Right clean -> Right $ CTransform projectionCols selectionCNF renameMap clean
       Left err -> Left err
 
-{- TODO: test cases
-  select m1.a,m2.b from mama as m1 join mama as m2 on m1.c==m2.d where m1.x==2 and m2.y==4
-  select m1.a,m2.b from mama as m1 join mama as m2 on m2.c==m1.d where m1.x==2 and m2.y==4
-
-  select m1.ga:sessions,m1.ga:date, m2.ga:sessions from mama as m1 join mama as m2 on m1.ga:date==m2.ga:date where m1.ga:date between "2017-01-01" and "2017-02-01" and m2.ga:date between "2017-01-01" and "2017-02-01"
-
-
-  should produce minimal result:
-  select a from t as tt where t.c==3
--}
-
-
 transformToClean (InnerJoin left colLeft colRight right) =
   case (transformToClean left, transformToClean right) of
     (Right leftC, Right rightC) -> Right $ CInnerJoin leftC colLeft colRight rightC
     (Left err, _) -> Left err
     (_, Left err) -> Left err
-
 
 transformToClean x = Left $ TError $ "Unexpected node: " ++ show x
 
