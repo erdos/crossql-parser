@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -Wall -Werror #-}
+
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
 module SQLParser (QuerySpec(SFW, SFWG, SFWGH), ColumnMath,
                   SQLParser.parse, runParser, SQLParser.parseLogicTree,
@@ -106,8 +107,10 @@ parseMixTabColTree = CNF.parseLogicTree $ Comp.parse1 $ parseMathExpr parseTabCo
 parseJoinedTable :: Parser JoinedTable
 parseJoinedTable = do
   cs <- commasep1 parseOne
-  let Just fj = flattenJoin cs
-    in return fj
+  let fjref = flattenJoin cs
+    in case fjref of
+         Nothing -> fail "failed to parse joined table"
+         Just fj -> return fj
   where
     parseOne = try $ do
       kk <- parseTableReference

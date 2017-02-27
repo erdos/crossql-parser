@@ -4,8 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
-
-{-# OPTIONS_GHC -Wall -Werror #-}
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
 -- http://www.databasteknik.se/webbkursen/relalg-lecture/
 
@@ -170,16 +169,14 @@ findEquivalence (at, bt, cnf) = case f $ clauses cnf of
 doJoins :: TabColCNF -> [RelAlg] -> (TabColCNF, RelAlg)
 doJoins _ [] = error "illegal arg"
 doJoins cnf [ra] = (cnf, ra)
-doJoins cnf (a : b : relalgs) = (finalCNF, inner) where
-
-  inner = InnerJoin a (unqualifyTCN c1) (unqualifyTCN c2) jj
-
-  (Just at) = getMaybeTableId a
-  (Just bt) = getMaybeTableId b
-
-  (finalCNF, jj) = doJoins restCNF (b:relalgs)
-
-  Just (c1, c2, restCNF) = findEquivalence (at, bt, cnf)
+doJoins cnf (a : b : relalgs)
+  | Just at <- getMaybeTableId a
+  , Just bt <- getMaybeTableId b
+  , Just (c1, c2, restCNF) <- findEquivalence (at, bt, cnf)
+  , (finalCNF, jj) <- doJoins restCNF (b:relalgs)
+  , inner <- InnerJoin a (unqualifyTCN c1) (unqualifyTCN c2) jj
+  = (finalCNF, inner)
+doJoins _ _ = error "Other illegal case"
 
 
 {-

@@ -1,6 +1,6 @@
 #!/usr/bin/env runhaskell
 
-{-# OPTIONS_GHC -Wall -Werror #-}
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
 module Main (main) where
 

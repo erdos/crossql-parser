@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# OPTIONS_GHC -Wall -Werror #-}
+
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
 module Util (PrClj(pr),
              Negateable(negative),

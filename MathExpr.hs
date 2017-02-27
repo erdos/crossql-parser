@@ -6,8 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-{-# OPTIONS_GHC -Wall -Werror #-}
-
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
 module MathExpr (collect, AggregateFn(Min,Max,Avg,Cnt,Sum), MathExpr(Sca, Read, Add, Sub, Mul, Div, FnCall), SomeScalar(DD, II, SS),  parse, parseSomeScalar, parseMathExpr, parseAggregateFn, mathMaybeScalar, maybeEvalScalar,simplifyMathExpr, RenderColName(renderColName), mapMaybeMathExpr) where
 

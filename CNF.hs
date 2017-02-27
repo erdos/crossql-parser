@@ -5,6 +5,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
+{-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
+
 module CNF (LogicTree(And, Or, Not, Leaf), parseLogicTree, unfoldLogicTree, treeToPosCnf, conjunction, PosCNF, clauses, fromClauses, empty, insertClause, splitClauses, map2Clauses, mapPredicates, CNF.null, predicates, maybePosCNF) where
 -- cnf: literal diszjunkciok konjukcioja
 
