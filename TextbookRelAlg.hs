@@ -285,14 +285,16 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
 
     (outmostCNF, joined) = doJoins outerCNF branches
 
-    -- otlet:
+    -- otlet: itt valahol be kene vezeetni az expandequivalences tablat.
+    -- meg jobb lenne viszont, ha az expandequivalences a cnf-end dolgozna a (cnf+branchjoincond)-bol
+    -- kiszedett egyenlosegeket felhasznalva.
     renameMap = Map.map unqualifyMathExpr outerSelectMap
 
     ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
       where
         selMap = fromList [(renderMathCol cm mcn, cm) | (cm, mcn) <-selectClause]
         fromAlgs = preMapBranches fromClause
-        cnf = expandEquivalences $ fromClauses $ clauses wc ++ (fromCnf fromClause) where
+        cnf = fromClauses $ clauses wc ++ (fromCnf fromClause) where
           wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
           fromCnf (FromSimple _ _) = []
           fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
