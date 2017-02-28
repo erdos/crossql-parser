@@ -10,7 +10,7 @@
 
 module TextbookRelAlg (pipeline, CleanModel) where
 
-import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, insert)
+import Data.Map.Strict as Map (Map, fromList, keys, assocs, elems, notMember, map, insert, empty, findWithDefault)
 import Data.Maybe
 import Data.Either
 import Data.List
@@ -179,11 +179,46 @@ doJoins cnf (a : b : relalgs)
 doJoins _ _ = error "Other illegal case"
 
 
-{-
--- tranzitiv lezart.
+-- egyenlosegek kiterjesztese
 expandEquivalences :: (Eq a, Ord a) => (PosCNF (Comp (MathExpr a))) -> (PosCNF (Comp (MathExpr a)))
-expandEquivalences = undefined
+expandEquivalences cnf = newCNF where
 
+  newCNF = fromClauses $ concatMap mapClause $ clauses cnf
+
+  mapClause [literal]
+    | (Read litLeftSide, Read litRightSide) <- sides literal
+    , leftSides <- Map.findWithDefault [litLeftSide] litLeftSide mm
+    , rightSides <- Map.findWithDefault [litRightSide] litRightSide mm
+    = [[replaceSides (Read left1) (Read right1) literal]
+      | left1 <- leftSides
+      , right1 <- rightSides]
+
+  mapClause [literal]
+    | (Read litLeftSide, litRightSide) <- sides literal
+    , leftSides <- Map.findWithDefault [litLeftSide] litLeftSide mm
+    = [[replaceSides (Read left1) litRightSide literal] | left1 <- leftSides]
+
+  mapClause [literal]
+    | (litLeftSide, Read litRightSide) <- sides literal
+    , rightSides <- Map.findWithDefault [litRightSide] litRightSide mm
+    = [[replaceSides litLeftSide (Read right1) literal] | right1 <- rightSides]
+
+  mapClause literal = [literal]
+
+  --
+
+  -- (Map a [a])
+  mm = foldl (\m (k, v) -> let vs = Map.findWithDefault [] k m
+                           in Map.insert k (v:vs) m) Map.empty eqs2
+
+  -- eqs :: [(a, a)]
+  eqs2 = eqs ++ [(b,a) | (a, b) <- eqs]
+  eqs = catMaybes $ Data.List.map mEq $ clauses cnf where
+    mEq [CEQ (Read a) (Read b)] = Just (a, b)
+    mEq _ = Nothing
+
+
+{-
 -- adds col list just in front of FROM (maybe not needed?)
 addMProjection :: RelAlg -> RelAlg
 addMProjection = undefined
@@ -240,20 +275,24 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
   where
 
     -- make uo from projection only
-    preProjection = [ renderMathCol cm mcn | (cm, mcn) <- selectClause]
+    preProjection = [renderMathCol cm mcn | (cm, mcn) <- selectClause]
 
     -- outercnf -> seq of col names
     newJoined = foldl (\branch tcn -> ensureContains branch tcn (unqualifyTCN tcn)) joined colnames
       where colnames = concatMap (concatMapSides collect) (predicates outerCNF)
+
     filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
+
     (outmostCNF, joined) = doJoins outerCNF branches
+
     -- otlet:
     renameMap = Map.map unqualifyMathExpr outerSelectMap
+
     ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
       where
         selMap = fromList [(renderMathCol cm mcn, cm) | (cm, mcn) <-selectClause]
         fromAlgs = preMapBranches fromClause
-        cnf = fromClauses $ clauses wc ++ (fromCnf fromClause) where
+        cnf = expandEquivalences $ fromClauses $ clauses wc ++ (fromCnf fromClause) where
           wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
           fromCnf (FromSimple _ _) = []
           fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
