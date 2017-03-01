@@ -127,6 +127,13 @@ selectMapAccum m ra = (Map.fromList mixs, para ra) where
   mTableAlias = getMaybeTableId ra
 
 
+fromClauseToCnf :: FromClause -> TabColCNF
+fromClauseToCnf from = fromClauses $ fromCnf from where
+  fromCnf (FromSimple _ _) = []
+  fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
+  fromCnf (FromJoined _ _ Nothing xs) = fromCnf xs
+
+
 joinSelectMapAccum :: (TabColCNF, Map ColumnName TabColMath)
                    -> RelAlg -> ((TabColCNF, Map ColumnName TabColMath), RelAlg)
 joinSelectMapAccum (tcnf, m) ra = ((cnf2, m2), ra3) where
@@ -179,50 +186,41 @@ doJoins cnf (a : b : relalgs)
 doJoins _ _ = error "Other illegal case"
 
 
--- egyenlosegek kiterjesztese
-expandEquivalences :: (Eq a, Ord a) => (PosCNF (Comp (MathExpr a))) -> (PosCNF (Comp (MathExpr a)))
-expandEquivalences cnf = newCNF where
-
-  newCNF = fromClauses $ concatMap mapClause $ clauses cnf
-
-  mapClause [literal]
-    | (Read litLeftSide, Read litRightSide) <- sides literal
-    , leftSides <- Map.findWithDefault [litLeftSide] litLeftSide mm
-    , rightSides <- Map.findWithDefault [litRightSide] litRightSide mm
-    = [[replaceSides (Read left1) (Read right1) literal]
-      | left1 <- leftSides
-      , right1 <- rightSides]
-
-  mapClause [literal]
-    | (Read litLeftSide, litRightSide) <- sides literal
-    , leftSides <- Map.findWithDefault [litLeftSide] litLeftSide mm
-    = [[replaceSides (Read left1) litRightSide literal] | left1 <- leftSides]
-
-  mapClause [literal]
-    | (litLeftSide, Read litRightSide) <- sides literal
-    , rightSides <- Map.findWithDefault [litRightSide] litRightSide mm
-    = [[replaceSides litLeftSide (Read right1) literal] | right1 <- rightSides]
-
-  mapClause literal = [literal]
-
-  --
-
-  -- (Map a [a])
-  mm = foldl (\m (k, v) -> let vs = Map.findWithDefault [] k m
-                           in Map.insert k (v:vs) m) Map.empty eqs2
-
-  -- eqs :: [(a, a)]
+-- TODO: tranzitiv lezartat is kene szamolni.
+findEquivalences :: (Eq a, Ord a) => (PosCNF (Comp (MathExpr a))) -> (Map a [a])
+findEquivalences cnf = foldl f  Map.empty eqs2 where
+  f m (k, v) = Map.insert k (v: (Map.findWithDefault [] k m)) m
   eqs2 = eqs ++ [(b,a) | (a, b) <- eqs]
   eqs = catMaybes $ Data.List.map mEq $ clauses cnf where
     mEq [CEQ (Read a) (Read b)] = Just (a, b)
     mEq _ = Nothing
 
+-- egyenlosegek kiterjesztese
+-- az egyszeru (olyanok, ahol egyik oldalt read van) kifejezesek read oldalat transzformalja a
+-- megadott egyenlosegek segitsegevel.
+-- TODO: lehet altalanositani rajta.
+expandEquivalences :: (Map TabColName [TabColName])
+                   -> (PosCNF (Comp (MathExpr TabColName)))
+                   -> (PosCNF (Comp (MathExpr TabColName)))
+expandEquivalences mm = fromClauses . (concatMap mapClause) . clauses where
+  ffind x = x : Map.findWithDefault [] x mm
+  mapClause literal@[(CEQ _ _)] = [literal]
+  mapClause [literal]
+    | (Read litLeftSide, Read litRightSide) <- sides literal
+    , leftSides <- ffind litLeftSide
+    , rightSides <- ffind litRightSide
+    = [[replaceSides (Read left1) (Read right1) literal]
+      | left1 <- leftSides , right1 <- rightSides]
+  mapClause [literal]
+    | (Read litLeftSide, litRightSide) <- sides literal
+    , leftSides <- ffind litLeftSide
+    = [[replaceSides (Read left1) litRightSide literal] | left1 <- leftSides]
+  mapClause [literal]
+    | (litLeftSide, Read litRightSide) <- sides literal
+    , rightSides <- ffind litRightSide
+    = [[replaceSides litLeftSide (Read right1) literal] | right1 <- rightSides]
+  mapClause literal = [literal]
 
-{-
--- adds col list just in front of FROM (maybe not needed?)
-addMProjection :: RelAlg -> RelAlg
-addMProjection = undefined
--}
 
 -- TODO: debug to cover all cases
 ensureContains :: RelAlg -> TabColName -> ColumnName -> RelAlg
@@ -281,24 +279,20 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
     newJoined = foldl (\branch tcn -> ensureContains branch tcn (unqualifyTCN tcn)) joined colnames
       where colnames = concatMap (concatMapSides collect) (predicates outerCNF)
 
-    filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF
+    filterCNF = mapPredicates (mapSides1 unqualifyMathExpr) outmostCNF :: ColCNF
 
-    (outmostCNF, joined) = doJoins outerCNF branches
+    (outmostCNF :: TabColCNF, joined) = doJoins outerCNF branches
 
-    -- otlet: itt valahol be kene vezeetni az expandequivalences tablat.
-    -- meg jobb lenne viszont, ha az expandequivalences a cnf-end dolgozna a (cnf+branchjoincond)-bol
-    -- kiszedett egyenlosegeket felhasznalva.
     renameMap = Map.map unqualifyMathExpr outerSelectMap
 
     ((outerCNF, outerSelectMap), branches) = mapAccumL joinSelectMapAccum (cnf, selMap) fromAlgs
       where
         selMap = fromList [(renderMathCol cm mcn, cm) | (cm, mcn) <-selectClause]
         fromAlgs = preMapBranches fromClause
-        cnf = fromClauses $ clauses wc ++ (fromCnf fromClause) where
-          wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
-          fromCnf (FromSimple _ _) = []
-          fromCnf (FromJoined _ _ (Just jc) xs) = (clauses $ treeToPosCnf jc) ++ (fromCnf xs)
-          fromCnf (FromJoined _ _ Nothing xs) = fromCnf xs
+        cnf = expandEquivalences joinEquivalences cnf1 where
+          joinEquivalences = findEquivalences $ fromClauseToCnf fromClause
+          cnf1 = fromClauses $ clauses wc ++ (clauses $ fromClauseToCnf fromClause) where
+            wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
 
 transform (SFWG _ _ _ _) = undefined
 

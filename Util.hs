@@ -1,5 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, MultiParamTypeClasses, FlexibleContexts #-}
+
 
 {-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
@@ -9,7 +9,8 @@ module Util (PrClj(pr),
              colName,
              splitEither, maybeAll, maybeAllMapToSame, maybeTuple,
              groupMapBy,  allTheSame, mapAssoc2, unique,
-             ColumnName(CN), TableName(TN), TabColName(TCN)) where
+             ColumnName(CN), TableName(TN), TabColName(TCN),
+             MultiReplace(multiReplace)) where
 
 import Data.Char(toUpper)
 import Data.List (nub, delete, intercalate, group, sort)
@@ -126,3 +127,6 @@ maybeTuple (Just a, Just b) = Just (a, b)
 
 unique :: (Ord a) => [a] -> [a]
 unique = map head . group . sort
+
+class (MultiReplace m) where
+  multiReplace :: (a -> [b]) -> m a -> [m b]

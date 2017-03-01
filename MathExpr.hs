@@ -191,3 +191,8 @@ mapMaybeMathExpr f (FnCall (Cnt a)) = fmap (FnCall . Cnt) (f a)
 -- mapMonadMathExpr f (Sca s) = fmap f undefined
 
 --mapMonadMathExpr _ _ = undefined
+
+
+
+--replaceMulti :: (a -> [b]) -> MathExpr a -> [MathExpr b]
+--replaceMulti a x@(FnCall _) = [x]
