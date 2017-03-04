@@ -1,5 +1,7 @@
 {-# LANGUAGE MagicHash #-}
 
+module MainEta (handler, main) where
+
 import Java
 import Main (handleLine)
 
