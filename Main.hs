@@ -2,7 +2,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror -fwarn-incomplete-uni-patterns  #-}
 
-module Main (main) where
+module Main (main, handleLine) where
 
 import SQLParser (parse)
 -- import SQLStrategy (transformer)
