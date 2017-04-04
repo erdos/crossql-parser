@@ -1,6 +1,10 @@
 #!/bin/sh
 
 cd "$(dirname "$0")"
-ghc -O3 Main.hs
-./Main
 
+if [ ! -f "Main" ]
+then
+    ghc -O3 Main.hs
+fi
+
+./Main
