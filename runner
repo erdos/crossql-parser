@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 if [ ! -f "Main" ]
 then
-    ghc -O3 Main.hs
+    ghc -O3 Main.hs &> /dev/null
 fi
 
 ./Main
