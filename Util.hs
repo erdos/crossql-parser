@@ -6,7 +6,7 @@
 module Util (PrClj(pr),
              Negateable(negative),
              stringI, parseIdentifier,
-             colName,
+             colName, parseStringLiteral,
              splitEither, maybeAll, maybeAllMapToSame, maybeTuple,
              groupMapBy,  allTheSame, mapAssoc2, unique,
              ColumnName(CN), TableName(TN), TabColName(TCN),
@@ -72,13 +72,21 @@ stringI :: String -> Parser String
 stringI cs = mapM caseChar cs <?> cs where
   caseChar c = satisfy (\x -> toUpper x == toUpper c)
 
+parseStringLiteral :: Parser String
+parseStringLiteral =
+  do
+    _ <- char '\''
+    x <- many1 $ noneOf "\'"
+    _ <- char '\''
+    return x
+
 parseIdentifier :: Parser String
 parseIdentifier = idBacktick <|> id1
   where
     idBacktick = do {
-      _ <- char '`';
-      s <- many1 $ noneOf "`" ; -- satisfy (/= '`');
-      _ <- char '`';
+      _ <- char '\"';
+      s <- many1 $ noneOf "\"" ; -- satisfy (/= '`');
+      _ <- char '\"';
       return s}
     id1 = do {
       firstChar <- letter <|> oneOf "_$";

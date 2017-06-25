@@ -36,7 +36,7 @@ data MathExpr a = Sca SomeScalar
 
 parseSomeScalar :: Parser SomeScalar
 parseSomeScalar = s <|> n where
-  s = SS <$> stringLiteral haskell
+  s = SS <$> parseStringLiteral
   n = do {x <- naturalOrFloat haskell;
           return (case x of (Left i) -> II i; (Right d) -> DD d)}
 
