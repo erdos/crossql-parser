@@ -48,11 +48,11 @@ arg1 (Min x) = x
 arg1 (Sum x) = x
 
 instance (PrClj a) => PrClj (AggregateFn a) where
-  pr (Avg x) = "AVG(" ++ pr x ++ ")"
-  pr (Cnt x) = "CNT(" ++ pr x ++ ")"
-  pr (Max x) = "MAX(" ++ pr x ++ ")"
-  pr (Min x) = "MIN(" ++ pr x ++ ")"
-  pr (Sum x) = "SUM(" ++ pr x ++ ")"
+  pr (Avg x) = "(AVG " ++ pr x ++ ")"
+  pr (Cnt x) = "(CNT " ++ pr x ++ ")"
+  pr (Max x) = "(MAX " ++ pr x ++ ")"
+  pr (Min x) = "(MIN " ++ pr x ++ ")"
+  pr (Sum x) = "(SUM " ++ pr x ++ ")"
 
 instance PrClj SomeScalar where
   pr (SS ss) = "\"" ++ ss ++ "\""

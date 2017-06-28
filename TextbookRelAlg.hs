@@ -31,6 +31,7 @@ data RelAlg = Source TableName -- table name with alias
             | Projection [ColumnName] RelAlg -- filter cols
             | Selection (PosCNF (Comp (MathExpr ColumnName))) RelAlg -- filter rows
             | Rename (Map ColumnName (MathExpr ColumnName)) RelAlg -- renames some cols (adds them)
+            | Grouping [ColumnName] RelAlg
             | InnerJoin RelAlg ColumnName ColumnName RelAlg -- join where column names match
             | MTableAlias TableName RelAlg -- meta: contains table alias
             | MProjection [ColumnName] RelAlg
@@ -43,7 +44,7 @@ buildProjectSelectRename a b c rel = Projection a $ Selection b $ Rename c rel
 data CleanModel = CS [ColumnName] (PosCNF (CompOrder ColumnName SomeScalar)) TableName
                 | CInnerJoin CleanModel ColumnName ColumnName CleanModel
                 | CTransform [ColumnName] ColCNF (Map ColumnName ColMath) CleanModel
-                --  TODO: grouping node too
+                | CGrouping [ColumnName] (Map ColumnName (AggregateFn ColumnName)) CleanModel
                 deriving (Eq, Show, Ord)
 
 data TransformError = TError String
@@ -65,12 +66,19 @@ instance PrClj CleanModel where
     ++ ":map " ++ pr m
     ++ ":source " ++ pr source
     ++ "}"
+  pr (CGrouping cols m source) =
+    "{:group-by [" ++ concat [" " ++ show col ++ " " | (CN col) <- cols] ++ "]"
+    ++ " :map " ++ pr m
+    ++ " :source " ++ pr source
+    ++ "}"
+
 
 instance PrClj TransformError where
   pr (TError msg) = "{:error " ++ show msg ++ "}"
 
 getMaybeTableId :: RelAlg -> Maybe TableName
 getMaybeTableId (Source tn) = Just tn
+getMaybeTableId (Grouping _ x) = getMaybeTableId x
 getMaybeTableId (Projection _ x) = getMaybeTableId x
 getMaybeTableId (Selection _ x) = getMaybeTableId x
 getMaybeTableId (Rename _ x) = getMaybeTableId x
@@ -294,14 +302,19 @@ transform (SFW selectClause fromClause@(FromJoined _ _ _ _) whereClause)
           cnf1 = fromClauses $ clauses wc ++ (clauses $ fromClauseToCnf fromClause) where
             wc  = mapPredicates (mapSides Read id) (treeToPosCnf whereClause)
 
-transform (SFWG _ _ _ _) = undefined
+-- calls to next implementation
+transform (SFWGH a b c d havingC) = Selection cnf $ transform $ inside where
+  inside = SFWG a b c d
+  cnf = mapPredicates (mapSides FnCall Sca) $ treeToPosCnf havingC
 
-transform (SFWGH _ _ _ _ _) = undefined
+-- simple impl (maybe more later)
+transform (SFWG a b c groupingC) = Grouping groupingC $ transform (SFW a b c) where
 
 -- maybe keep them instead
 -- TODO: maybe clean MTableAlias nodes or wtf
 cleanMetaNodes :: RelAlg -> RelAlg
 cleanMetaNodes (MTableAlias _ r) = cleanMetaNodes r
+cleanMetaNodes (Grouping g r) = Grouping g $ cleanMetaNodes r
 cleanMetaNodes node@(Source _) = node
 cleanMetaNodes (MProjection _ r) = cleanMetaNodes r
 cleanMetaNodes (Projection p r) = Projection p $ cleanMetaNodes r
@@ -355,7 +368,22 @@ transformToClean (InnerJoin left colLeft colRight right) =
     (Left err, _) -> Left err
     (_, Left err) -> Left err
 
-transformToClean x = Left $ TError $ "Unexpected node: " ++ show x
+-- transformToClean (Selection sel grp@(Grouping _ _))
+--  = CTransform [] transformToClean grp
+
+
+transformToClean (Grouping groupByColList xs)
+  | Right (CTransform cn cnf colMap root) <- transformToClean xs
+  , (fnAssocs, otherAssocs) <- partitionEithers [
+      case v of
+        (FnCall fc) -> Left (k, fc)
+        _ -> Right (k, v)
+      |(k,v) <- assocs colMap]
+  , trMap <- Map.fromList otherAssocs
+  , mappi <- Map.fromList fnAssocs
+  = Right $ CTransform cn cnf trMap $ CGrouping groupByColList mappi root
+
+transformToClean x = Left $ TError $ "Unexpcted node: " ++ show x
 
 
 pipeline :: QuerySpec -> Either TransformError CleanModel
